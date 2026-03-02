@@ -230,6 +230,8 @@ private:
     void draw_numbered_square_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color, int number);  // Square with number
     void draw_alternate_play_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);   // Alternate play icon (outline)
     void draw_alternate_pause_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);  // Alternate pause icon (outline)
+    void draw_style3_play_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);     // Style 3 play icon (solid)
+    void draw_style3_pause_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);    // Style 3 pause icon (solid)
 
     void draw_super_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color);  // Super button icon (3x3 grid of dots)
     void draw_stop_icon(Gdiplus::Graphics& g, const RECT& rect, const Gdiplus::Color& color, bool filled = false);  // Stop icon (square)
