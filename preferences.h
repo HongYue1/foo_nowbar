@@ -24,7 +24,7 @@ bool get_nowbar_stop_after_current_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_super_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_miniplayer_icon_visible();  // true=Show, false=Hidden
 bool get_nowbar_hover_circles_enabled();  // true=Yes (show), false=No (hide)
-bool get_nowbar_alternate_icons_enabled();  // true=Enabled, false=Disabled
+int get_nowbar_alternate_icons_style();  // 0=Style 1, 1=Style 2, 2=Style 3
 int get_nowbar_play_icon_style();  // 0=Normal, 1=Inverted
 bool get_nowbar_cbutton_autohide();  // true=Yes (auto-hide), false=No
 bool get_nowbar_volume_icon_visible();  // true=Show, false=Hidden
