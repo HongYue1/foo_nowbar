@@ -1112,10 +1112,11 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       static_cast<int>(m_metrics.seekbar_height * m_size_scale);
   int total_seekbar_area = seek_gap + seekbar_height;
 
-  // Mode 1 (Spectrum): no seekbar below buttons, so no vertical offset needed
+  // Mode 1 (Spectrum) or seekbar hidden: no seekbar below buttons, so no vertical offset needed
   int pre_vis_mode = get_nowbar_visualization_mode();
+  bool seekbar_visible = get_nowbar_seekbar_visible();
   int vertical_offset;
-  if (pre_vis_mode == 1) {
+  if (pre_vis_mode == 1 || !seekbar_visible) {
     vertical_offset = 0;  // Buttons centered without seekbar offset
   } else {
     // Calculate how much space we need below the play button for seekbar
@@ -1620,7 +1621,34 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   m_rect_waveform = {};
   m_rect_spectrum_full = {};
 
-  if (vis_mode == 1) {
+  if (!seekbar_visible) {
+    // Seekbar hidden: clear all seekbar/time rects across all modes
+    m_rect_seekbar = {};
+    m_rect_time = {};
+    if (vis_mode == 1) {
+      // Still set up spectrum area even with seekbar off
+      int spectrum_left = get_nowbar_mood_icon_visible() ? m_rect_heart.left : core_left_edge;
+      int spectrum_right = get_nowbar_super_icon_visible() ? m_rect_super.right : core_right_edge;
+      if (seekbar_length_mode == 1) {
+        int sp = static_cast<int>(full_spacing);
+        int avail_left = get_nowbar_cover_artwork_visible() ? m_rect_artwork.right + sp : rect.left + sp;
+        int avail_right = has_cbuttons ? cbuttons_left_edge - sp
+                        : volume_visible ? m_rect_volume.left - sp
+                        : rect.right - sp;
+        int left_gap = spectrum_left - avail_left;
+        int right_gap = avail_right - spectrum_right;
+        if (left_gap > 0) spectrum_left -= left_gap / 2;
+        if (right_gap > 0) spectrum_right += right_gap / 2;
+      }
+      int panel_h = rect.bottom - rect.top;
+      int spec_height_mode = get_nowbar_spectrum_height();
+      int spectrum_top;
+      if (spec_height_mode == 0)       spectrum_top = rect.top + panel_h * 4 / 5;
+      else if (spec_height_mode == 1)  spectrum_top = rect.top + panel_h * 2 / 3;
+      else                             spectrum_top = rect.top + panel_h / 2;
+      m_rect_spectrum_full = {spectrum_left, spectrum_top, spectrum_right, rect.bottom};
+    }
+  } else if (vis_mode == 1) {
     // Mode 1 (Spectrum): thin progress bar at top, full spectrum at bottom behind buttons
     // No seekbar in this mode
     m_rect_seekbar = {};
@@ -1744,26 +1772,35 @@ void ControlPanelCore::paint(HDC hdc, const RECT &rect) {
     draw_artwork(g);
   }
   int paint_vis_mode = get_nowbar_visualization_mode();
+  bool paint_seekbar_visible = get_nowbar_seekbar_visible();
   if (paint_vis_mode == 1) {
     // Mode 1: spectrum first, then track info on top, then buttons, then thin progress bar + time
     draw_full_spectrum_gdiplus(g);
     draw_track_info(g);
     draw_playback_buttons(g);
-    draw_thin_progress_bar(g);
-    draw_time_display_top_right(g);
+    if (paint_seekbar_visible) {
+      draw_thin_progress_bar(g);
+      draw_time_display_top_right(g);
+    }
   } else if (paint_vis_mode == 2) {
     draw_track_info(g);
-    // Mode 2: waveform behind buttons, then buttons, then tooltip on top, then time display
-    draw_waveform_bar(g);
-    draw_playback_buttons(g);
-    draw_waveform_tooltip(g);
-    draw_time_display(g);
+    if (paint_seekbar_visible) {
+      // Mode 2: waveform behind buttons, then buttons, then tooltip on top, then time display
+      draw_waveform_bar(g);
+      draw_playback_buttons(g);
+      draw_waveform_tooltip(g);
+      draw_time_display(g);
+    } else {
+      draw_playback_buttons(g);
+    }
   } else {
     // Mode 0: normal seekbar, no visualization
     draw_track_info(g);
     draw_playback_buttons(g);
-    draw_seekbar(g);
-    draw_time_display(g);
+    if (paint_seekbar_visible) {
+      draw_seekbar(g);
+      draw_time_display(g);
+    }
   }
   draw_volume(g);
 
