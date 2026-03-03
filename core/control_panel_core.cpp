@@ -1901,14 +1901,10 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // This is drawn BEFORE buttons so spectrum appears behind them
   draw_full_spectrum(hdc);
 
-  // Redraw track info on top of the spectrum — the background cache restore
-  // above wipes it because the spectrum area extends above the track info.
-  {
-    Gdiplus::Graphics g(hdc);
-    g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
-    g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
-    draw_track_info(g);
-  }
+  // Track info text persists on the offscreen bitmap from the last full
+  // paint.  Do NOT redraw background + text here — that would erase the
+  // spectrum bars in the track info area, producing a visible "invisible
+  // rectangle" where the animation is blocked.
 
   // Restore background behind core button rects that extend above the spectrum
   // area.  At small panel heights the track info text clamp pushes
@@ -1921,8 +1917,18 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     int spec_top = m_rect_spectrum_full.top;
     bool buttons_above_spectrum =
         (m_rect_play.right > m_rect_play.left && m_rect_play.top < spec_top) ||
-        (m_rect_miniplayer.right > m_rect_miniplayer.left && m_rect_miniplayer.top < spec_top) ||
-        (m_rect_cbutton1.right > m_rect_cbutton1.left && m_rect_cbutton1.top < spec_top);
+        (m_rect_miniplayer.right > m_rect_miniplayer.left && m_rect_miniplayer.top < spec_top);
+    // Custom buttons are outside the spectrum area and always need full
+    // background restoration (via add_full_rect), so any enabled custom
+    // button should trigger this block.
+    bool has_cbuttons =
+        (m_rect_cbutton1.right > m_rect_cbutton1.left) ||
+        (m_rect_cbutton2.right > m_rect_cbutton2.left) ||
+        (m_rect_cbutton3.right > m_rect_cbutton3.left) ||
+        (m_rect_cbutton4.right > m_rect_cbutton4.left) ||
+        (m_rect_cbutton5.right > m_rect_cbutton5.left) ||
+        (m_rect_cbutton6.right > m_rect_cbutton6.left);
+    buttons_above_spectrum = buttons_above_spectrum || has_cbuttons;
 
     if (buttons_above_spectrum) {
       Gdiplus::Graphics g(hdc);
@@ -1934,11 +1940,11 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
       Gdiplus::Region btn_clip;
       btn_clip.MakeEmpty();
 
-      auto add_rect = [&](const RECT& r) {
+      // Core buttons sit WITHIN the spectrum area — below spec_top the
+      // spectrum overlay provides their visual background, so we only
+      // restore background above spec_top to avoid gaps in the spectrum.
+      auto add_core_rect = [&](const RECT& r) {
         if (r.right > r.left && r.top < spec_top) {
-          // Inflate by hover scale factor so the restored background covers
-          // the full area of hover-enlarged buttons (anti-aliased edges of
-          // scaled-up circles/icons would otherwise accumulate on stale pixels)
           int w = r.right - r.left;
           int h = r.bottom - r.top;
           int pad_x = static_cast<int>(w * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
@@ -1950,23 +1956,40 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
           btn_clip.Union(Gdiplus::Rect(left, top, right - left, bottom - top));
         }
       };
-      add_rect(m_rect_heart);
-      add_rect(m_rect_shuffle);
-      add_rect(m_rect_prev);
-      add_rect(m_rect_play);
-      add_rect(m_rect_next);
-      add_rect(m_rect_stop);
-      add_rect(m_rect_stop_after_current);
-      add_rect(m_rect_repeat);
-      add_rect(m_rect_super);
-      add_rect(m_rect_miniplayer);
-      for (int i = 0; i < 5; i++) add_rect(m_rect_stars[i]);
-      add_rect(m_rect_cbutton1);
-      add_rect(m_rect_cbutton2);
-      add_rect(m_rect_cbutton3);
-      add_rect(m_rect_cbutton4);
-      add_rect(m_rect_cbutton5);
-      add_rect(m_rect_cbutton6);
+      // Custom buttons sit OUTSIDE the spectrum area horizontally (right
+      // of the super button).  Below spec_top they have no spectrum overlay
+      // — only stale cached content from the previous full paint, which
+      // includes the button icon baked in.  Drawing a semi-transparent
+      // hover circle on top of the baked-in icon makes the lower half
+      // nearly invisible.  Restore their full rect so hover circles draw
+      // on a clean background both above and below spec_top.
+      auto add_full_rect = [&](const RECT& r) {
+        if (r.right > r.left && r.bottom > r.top) {
+          int w = r.right - r.left;
+          int h = r.bottom - r.top;
+          int pad_x = static_cast<int>(w * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
+          int pad_y = static_cast<int>(h * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 1;
+          btn_clip.Union(Gdiplus::Rect(r.left - pad_x, r.top - pad_y,
+              w + pad_x * 2, h + pad_y * 2));
+        }
+      };
+      add_core_rect(m_rect_heart);
+      add_core_rect(m_rect_shuffle);
+      add_core_rect(m_rect_prev);
+      add_core_rect(m_rect_play);
+      add_core_rect(m_rect_next);
+      add_core_rect(m_rect_stop);
+      add_core_rect(m_rect_stop_after_current);
+      add_core_rect(m_rect_repeat);
+      add_core_rect(m_rect_super);
+      add_core_rect(m_rect_miniplayer);
+      for (int i = 0; i < 5; i++) add_core_rect(m_rect_stars[i]);
+      add_full_rect(m_rect_cbutton1);
+      add_full_rect(m_rect_cbutton2);
+      add_full_rect(m_rect_cbutton3);
+      add_full_rect(m_rect_cbutton4);
+      add_full_rect(m_rect_cbutton5);
+      add_full_rect(m_rect_cbutton6);
 
       g.SetClip(&btn_clip);
       draw_background(g, panel_rect);
@@ -2036,6 +2059,25 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
           m_rect_time.right - m_rect_time.left,
           m_rect_time.bottom - m_rect_time.top));
     }
+    // Exclude custom button rects — the volume icon hover circle region
+    // (icon_center_x ± vol_h/2) can extend leftward into adjacent custom
+    // buttons.  draw_playback_buttons() already drew hover circles on those
+    // buttons; wiping them here produces half-rendered hover circles.
+    auto exclude_cbutton = [&](const RECT& r) {
+      if (r.right > r.left) {
+        int w = r.right - r.left;
+        int h = r.bottom - r.top;
+        int pad = static_cast<int>(w * (HOVER_SCALE_FACTOR - 1.0f) / 2.0f) + 2;
+        vol_clip.Exclude(Gdiplus::Rect(r.left - pad, r.top - pad,
+            w + pad * 2, h + pad * 2));
+      }
+    };
+    exclude_cbutton(m_rect_cbutton1);
+    exclude_cbutton(m_rect_cbutton2);
+    exclude_cbutton(m_rect_cbutton3);
+    exclude_cbutton(m_rect_cbutton4);
+    exclude_cbutton(m_rect_cbutton5);
+    exclude_cbutton(m_rect_cbutton6);
     if (!vol_clip.IsEmpty(&gv)) {
       gv.SetClip(&vol_clip);
       draw_background(gv, panel_rect);
@@ -3768,27 +3810,53 @@ void ControlPanelCore::update_spectrum_data() {
       float f_hi = std::pow(10.0f, log_min + (log_max - log_min) * (i + 1) / m_spectrum_bar_count);
       float f_center = (f_lo + f_hi) * 0.5f;
 
-      int bin_lo = (int)(f_lo / bin_freq_step);
-      int bin_hi = (int)(f_hi / bin_freq_step);
-      if (bin_lo < 0) bin_lo = 0;
-      if (bin_hi >= (int)sample_count) bin_hi = (int)sample_count - 1;
-      if (bin_lo > bin_hi) bin_lo = bin_hi;
+      float fbin_lo = f_lo / bin_freq_step;
+      float fbin_hi = f_hi / bin_freq_step;
+      if (fbin_lo < 0.0f) fbin_lo = 0.0f;
+      if (fbin_hi < 0.0f) fbin_hi = 0.0f;
+      if (fbin_lo >= (float)(sample_count - 1)) fbin_lo = (float)(sample_count - 1) - 0.001f;
+      if (fbin_hi >= (float)(sample_count - 1)) fbin_hi = (float)(sample_count - 1) - 0.001f;
 
       float aw = a_weight(f_center);
 
-      float magnitude = 0.0f;
-      if (nch >= 2) {
-        // Average channels for mono display
-        for (int b = bin_lo; b <= bin_hi; b++) {
-          float avg = 0.0f;
-          for (int ch = 0; ch < nch; ch++) avg += data[b * nch + ch];
-          avg /= (float)nch;
-          avg *= aw;
-          if (avg > magnitude) magnitude = avg;
+      // Helper: interpolate a single bin value at a fractional position
+      auto interp_bin = [&](float fbin) -> float {
+        int b0 = (int)fbin;
+        int b1 = b0 + 1;
+        if (b1 >= (int)sample_count) b1 = b0;
+        float t = fbin - (float)b0;
+        if (nch >= 2) {
+          float avg0 = 0.0f, avg1 = 0.0f;
+          for (int ch = 0; ch < nch; ch++) { avg0 += data[b0 * nch + ch]; avg1 += data[b1 * nch + ch]; }
+          avg0 /= (float)nch; avg1 /= (float)nch;
+          return (avg0 + (avg1 - avg0) * t) * aw;
+        } else {
+          return (data[b0] + (data[b1] - data[b0]) * t) * aw;
         }
+      };
+
+      float magnitude = 0.0f;
+      int bin_lo = (int)fbin_lo;
+      int bin_hi = (int)fbin_hi;
+      if (bin_lo == bin_hi) {
+        // Narrow band: interpolate at center frequency for smooth transitions
+        float fbin_center = f_center / bin_freq_step;
+        if (fbin_center < 0.0f) fbin_center = 0.0f;
+        if (fbin_center >= (float)(sample_count - 1)) fbin_center = (float)(sample_count - 1) - 0.001f;
+        magnitude = interp_bin(fbin_center);
       } else {
-        for (int b = bin_lo; b <= bin_hi; b++) {
-          float val = data[b] * aw;
+        // Wide band: interpolate at edges, peak across whole interior bins
+        magnitude = std::max(interp_bin(fbin_lo), interp_bin(fbin_hi));
+        for (int b = bin_lo + 1; b < bin_hi; b++) {
+          float val;
+          if (nch >= 2) {
+            float avg = 0.0f;
+            for (int ch = 0; ch < nch; ch++) avg += data[b * nch + ch];
+            avg /= (float)nch;
+            val = avg * aw;
+          } else {
+            val = data[b] * aw;
+          }
           if (val > magnitude) magnitude = val;
         }
       }
