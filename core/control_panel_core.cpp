@@ -1644,11 +1644,15 @@ void ControlPanelCore::update_layout(const RECT &rect) {
       if (left_gap > 0) spectrum_left -= left_gap / 2;
       if (right_gap > 0) spectrum_right += right_gap / 2;
     }
-    // Spectrum area extends from the panel midpoint to the bottom so
-    // that peak-amplitude bars rise to about halfway up the panel,
-    // naturally appearing behind the control buttons.
+    // Spectrum area extends from a configurable fraction down to the bottom.
+    // Height setting: High=bottom 50%, Normal=bottom 33%, Low=bottom 20%.
     // Track info and buttons are drawn on top of the spectrum overlay.
-    int spectrum_top = (rect.top + rect.bottom) / 2;
+    int panel_h = rect.bottom - rect.top;
+    int spec_height_mode = get_nowbar_spectrum_height();
+    int spectrum_top;
+    if (spec_height_mode == 0)       spectrum_top = rect.top + panel_h * 4 / 5;  // Low: 20%
+    else if (spec_height_mode == 1)  spectrum_top = rect.top + panel_h * 2 / 3;  // Normal: 33%
+    else                             spectrum_top = rect.top + panel_h / 2;       // High: 50%
     m_rect_spectrum_full = {spectrum_left, spectrum_top, spectrum_right, rect.bottom};
 
     // Time display in top-right corner, just below thin progress bar
