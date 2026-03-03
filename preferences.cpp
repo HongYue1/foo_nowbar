@@ -45,6 +45,11 @@ static cfg_int cfg_nowbar_bar_style(
     0  // Default: Pill-shaped
 );
 
+static cfg_int cfg_nowbar_seekbar_visible(
+    GUID{0xABCDEF06, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x03}},
+    1  // Default: On
+);
+
 static cfg_int cfg_nowbar_seekbar_length(
     GUID{0xABCDEF06, 0x1234, 0x5678, {0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x68, 0x01}},
     0  // Default: Fixed
@@ -1600,6 +1605,10 @@ int get_nowbar_bar_style() {
     return style;
 }
 
+bool get_nowbar_seekbar_visible() {
+    return cfg_nowbar_seekbar_visible != 0;
+}
+
 int get_nowbar_seekbar_length() {
     int len = cfg_nowbar_seekbar_length;
     if (len < 0) len = 0;
@@ -2835,6 +2844,8 @@ void nowbar_preferences::switch_tab(int tab) {
     ShowWindow(GetDlgItem(m_hwnd, IDC_BACKGROUND_STYLE_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_BAR_STYLE_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_VISIBLE_LABEL), show_appearance);
+    ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_VISIBLE_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_LABEL), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_COMBO), show_appearance);
     ShowWindow(GetDlgItem(m_hwnd, IDC_SEEKBAR_POSITION_LABEL), show_appearance);
@@ -3229,6 +3240,12 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         SendMessage(hBarStyleCombo, CB_ADDSTRING, 0, (LPARAM)L"Rectangular");
         SendMessage(hBarStyleCombo, CB_SETCURSEL, cfg_nowbar_bar_style, 0);
 
+        // Initialize seekbar visible combobox
+        HWND hSeekbarVisibleCombo = GetDlgItem(hwnd, IDC_SEEKBAR_VISIBLE_COMBO);
+        SendMessage(hSeekbarVisibleCombo, CB_ADDSTRING, 0, (LPARAM)L"On");
+        SendMessage(hSeekbarVisibleCombo, CB_ADDSTRING, 0, (LPARAM)L"Off");
+        SendMessage(hSeekbarVisibleCombo, CB_SETCURSEL, cfg_nowbar_seekbar_visible ? 0 : 1, 0);
+
         // Initialize seekbar length combobox
         HWND hSeekbarLengthCombo = GetDlgItem(hwnd, IDC_SEEKBAR_LENGTH_COMBO);
         SendMessage(hSeekbarLengthCombo, CB_ADDSTRING, 0, (LPARAM)L"Fixed");
@@ -3577,6 +3594,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
         case IDC_SMOOTH_ANIMATIONS_COMBO:
         case IDC_BACKGROUND_STYLE_COMBO:
         case IDC_BAR_STYLE_COMBO:
+        case IDC_SEEKBAR_VISIBLE_COMBO:
         case IDC_SEEKBAR_LENGTH_COMBO:
         case IDC_COVER_MARGIN_COMBO:
         case IDC_COVER_STYLE_COMBO:
@@ -4448,6 +4466,12 @@ void nowbar_preferences::apply_settings() {
         // Save bar style (0=Pill-shaped, 1=Rectangular)
         cfg_nowbar_bar_style = (int)SendMessage(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), CB_GETCURSEL, 0, 0);
 
+        // Save seekbar visible (0=On -> 1, 1=Off -> 0)
+        {
+            int seekbarVisibleSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_VISIBLE_COMBO), CB_GETCURSEL, 0, 0);
+            cfg_nowbar_seekbar_visible = (seekbarVisibleSel == 0) ? 1 : 0;
+        }
+
         // Save seekbar length (0=Fixed, 1=Scaling)
         cfg_nowbar_seekbar_length = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_COMBO), CB_GETCURSEL, 0, 0);
 
@@ -4717,6 +4741,8 @@ void nowbar_preferences::reset_settings() {
             SendMessage(GetDlgItem(m_hwnd, IDC_COVER_STYLE_COMBO), CB_SETCURSEL, 1, 0);  // Default: Rounded
             SendMessage(GetDlgItem(m_hwnd, IDC_BACKGROUND_STYLE_COMBO), CB_SETCURSEL, 0, 0);  // Default: Solid
             SendMessage(GetDlgItem(m_hwnd, IDC_BAR_STYLE_COMBO), CB_SETCURSEL, 0, 0);
+            cfg_nowbar_seekbar_visible = 1;  // Default: On
+            SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_VISIBLE_COMBO), CB_SETCURSEL, 0, 0);  // Default: On
             cfg_nowbar_seekbar_length = 0;  // Default: Fixed
             SendMessage(GetDlgItem(m_hwnd, IDC_SEEKBAR_LENGTH_COMBO), CB_SETCURSEL, 0, 0);  // Default: Fixed
             cfg_nowbar_seekbar_position = 0;  // Default: centered
