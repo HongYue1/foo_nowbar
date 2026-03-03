@@ -230,6 +230,10 @@
 #define IDC_SEEKBAR_POSITION_SLIDER      1540
 #define IDC_SEEKBAR_POSITION_VALUE       1541
 
+// Seekbar Visible controls (Appearance tab)
+#define IDC_SEEKBAR_VISIBLE_LABEL        1542
+#define IDC_SEEKBAR_VISIBLE_COMBO        1543
+
 // Shuffle/Repeat visibility controls (Icons tab)
 #define IDC_SHUFFLE_ICON_LABEL           1533
 #define IDC_SHUFFLE_ICON_COMBO           1534
