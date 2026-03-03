@@ -171,6 +171,8 @@
 #define IDC_VIS_WAVEFORM_UNPLAYED_COLOR_LABEL 1414
 #define IDC_VIS_WAVEFORM_UNPLAYED_COLOR_BTN   1415
 #define IDC_VIS_60FPS_CHECK                   1420
+#define IDC_VIS_SPECTRUM_HEIGHT_LABEL         1421
+#define IDC_VIS_SPECTRUM_HEIGHT_COMBO         1422
 
 // Online Artwork checkbox (Appearance tab)
 #define IDC_ONLINE_ARTWORK_CHECK       1416
