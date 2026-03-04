@@ -5049,15 +5049,9 @@ void ControlPanelCore::draw_waveform_bar(Gdiplus::Graphics& g) {
   }
 
   if (is_stream) {
-    // Streams: keep simple placeholder (can't be decoded ahead of time)
-    Gdiplus::SolidBrush placeholderBrush(Gdiplus::Color(60, 140, 140, 140));
-    g.FillRectangle(&placeholderBrush, m_rect_waveform.left, m_rect_waveform.top, w, h);
-    int progress_w = static_cast<int>(w * progress);
-    if (progress_w > 0) {
-      Gdiplus::SolidBrush progressBrush(Gdiplus::Color(120, GetRValue(wave_color), GetGValue(wave_color), GetBValue(wave_color)));
-      g.FillRectangle(&progressBrush, m_rect_waveform.left, m_rect_waveform.top, progress_w, h);
-    }
+    // Streams: no waveform data available, skip rendering entirely
     m_waveform_animating = false;
+    return;
   } else {
     // Advance reveal cursor toward decode count (ease-out)
     float decode_target = static_cast<float>(m_waveform_decode_count.load(std::memory_order_relaxed));
