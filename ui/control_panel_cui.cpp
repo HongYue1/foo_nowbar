@@ -249,19 +249,24 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
         
+    case ControlPanelCore::WM_NOWBAR_ANIMATE: {
+        // Thread-pool timer fired — release the one-shot handle, invalidate,
+        // and force an immediate paint so it isn't delayed by low-priority
+        // WM_PAINT scheduling.
+        if (m_core) m_core->on_animation_timer_fired();
+        const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
+        InvalidateRect(wnd, dirty, FALSE);
+        if (m_core) m_core->clear_animation_dirty();
+        UpdateWindow(wnd);
+        return 0;
+    }
+
     case WM_TIMER: {
-        // Handle different timers
         UINT_PTR timer_id = static_cast<UINT_PTR>(wp);
         if (timer_id == ControlPanelCore::COMMAND_STATE_TIMER_ID) {
-            // Command state polling timer - poll for fb2k action states
             if (m_core) m_core->poll_custom_button_states();
         } else if (timer_id == ControlPanelCore::SHOW_PREFS_TIMER_ID) {
             if (m_core) m_core->do_show_preferences();
-        } else {
-            // Animation timer fired - trigger a repaint to continue the animation
-            const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
-            InvalidateRect(wnd, dirty, FALSE);
-            if (m_core) m_core->clear_animation_dirty();
         }
         return 0;
     }
