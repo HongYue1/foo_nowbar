@@ -98,7 +98,11 @@ void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) {
 
     update_track_info(p_track);
     notify_track_changed();
-    notify_state_changed();
+    // notify_state_changed() intentionally omitted here:
+    // on_playback_starting() already fired a state change before this callback,
+    // and on_track_changed() handles all track-specific updates (theme, formats,
+    // artwork, invalidation).  The redundant state notification was causing
+    // evaluate_title_formats() and invalidate() to run a third time per track change.
 }
 
 void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason) {
@@ -534,11 +538,14 @@ bool PlaybackStateManager::check_and_skip_low_rating(metadb_handle_ptr p_track) 
     // Evaluate %rating% using title formatting
     // foo_playcount exposes rating through title formatting
     try {
-        static_api_ptr_t<titleformat_compiler> compiler;
-        titleformat_object::ptr format;
-        if (compiler->compile(format, "%rating%")) {
+        // Compile once and cache the titleformat object
+        if (!m_rating_format.is_valid()) {
+            static_api_ptr_t<titleformat_compiler> compiler;
+            compiler->compile(m_rating_format, "%rating%");
+        }
+        if (m_rating_format.is_valid()) {
             pfc::string8 rating_str;
-            p_track->format_title(nullptr, rating_str, format, nullptr);
+            p_track->format_title(nullptr, rating_str, m_rating_format, nullptr);
 
             // rating_str will be "1", "2", "3", "4", "5", or empty (no rating)
             // Only skip if there's a valid rating that's at or below threshold
