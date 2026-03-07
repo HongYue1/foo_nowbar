@@ -3541,9 +3541,9 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
             SendMessage(hSpecWidth, CB_ADDSTRING, 0, (LPARAM)L"Wide");
             SendMessage(hSpecWidth, CB_SETCURSEL, cfg_nowbar_spectrum_width, 0);
 
-            // Populate spectrum style combo (Mono/Stereo)
+            // Populate spectrum style combo (Bars/Curve/Dominoes)
             HWND hSpecStyle = GetDlgItem(hwnd, IDC_VIS_SPECTRUM_STYLE_COMBO);
-            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Mono");
+            SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Bars");
             SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Curve");
             SendMessage(hSpecStyle, CB_ADDSTRING, 0, (LPARAM)L"Dominoes");
             SendMessage(hSpecStyle, CB_SETCURSEL, cfg_nowbar_spectrum_style, 0);
@@ -4603,8 +4603,18 @@ void nowbar_preferences::apply_settings() {
         uGetDlgItemText(m_hwnd, IDC_LINE3_FORMAT_EDIT, format_str);
         cfg_nowbar_line3_format = format_str;
 
-        // Save theme mode
-        cfg_nowbar_theme_mode = (int)SendMessage(GetDlgItem(m_hwnd, IDC_THEME_MODE_COMBO), CB_GETCURSEL, 0, 0);
+        // Save theme mode — reset custom font colors when theme changes
+        {
+            int old_theme = cfg_nowbar_theme_mode;
+            int new_theme = (int)SendMessage(GetDlgItem(m_hwnd, IDC_THEME_MODE_COMBO), CB_GETCURSEL, 0, 0);
+            if (new_theme != old_theme) {
+                cfg_nowbar_track_font_color = -1;
+                cfg_nowbar_artist_font_color = -1;
+                cfg_nowbar_line3_font_color = -1;
+                cfg_nowbar_time_font_color = -1;
+            }
+            cfg_nowbar_theme_mode = new_theme;
+        }
         
         // Save smooth animations (0=Enabled, 1=Disabled in combobox -> config 1=Enabled, 0=Disabled)
         int smoothAnimSel = (int)SendMessage(GetDlgItem(m_hwnd, IDC_SMOOTH_ANIMATIONS_COMBO), CB_GETCURSEL, 0, 0);
