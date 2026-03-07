@@ -2028,11 +2028,6 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
   // This is drawn BEFORE buttons so spectrum appears behind them
   draw_full_spectrum(hdc);
 
-  // Track info text persists on the offscreen bitmap from the last full
-  // paint.  Do NOT redraw background + text here — that would erase the
-  // spectrum bars in the track info area, producing a visible "invisible
-  // rectangle" where the animation is blocked.
-
   // Restore background behind core button rects that extend above the spectrum
   // area.  At small panel heights the track info text clamp pushes
   // m_rect_spectrum_full.top below the button tops, so the cache_rect restore
@@ -2124,10 +2119,10 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     }
   }
 
-  // Now draw buttons ON TOP of the spectrum.
-  // No clip region — core playback buttons overlap the spectrum area, and
-  // custom buttons may extend into the right side where the background cache
-  // restore could have overwritten them. Redrawing all buttons is lightweight.
+  // Now draw track info and buttons ON TOP of the spectrum.
+  // The background cache restore above may overlap the track info area when
+  // the spectrum extends leftward in Scaling mode, erasing text. Redrawing
+  // track info here (without background) layers text over the spectrum bars.
   {
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
@@ -2135,6 +2130,7 @@ void ControlPanelCore::paint_spectrum_only(HDC hdc, const RECT& panel_rect) {
     g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
     g.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
+    draw_track_info(g);
     draw_playback_buttons(g);
   }
 
@@ -2686,16 +2682,10 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
       title_w,
       (float)title_h);
 
-  // Measure ~5 characters in the artist font to shorten the artist rect
-  Gdiplus::RectF charBounds;
-  g.MeasureString(L"XXXXX", 5, m_font_artist.get(), Gdiplus::PointF(0, 0), &charBounds);
-  float artist_w = text_w - charBounds.Width;
-  if (artist_w < 0) artist_w = 0;
-
   Gdiplus::RectF artistRect(
       (float)m_rect_track_info.left,
       (float)(m_rect_track_info.top + title_h + text_gap),
-      artist_w,
+      text_w,
       (float)artist_h);
 
   Gdiplus::StringFormat sf;
@@ -2716,12 +2706,13 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
 
   bool rating_on_line3_draw = (get_nowbar_rating_mode() == 2);
   if (!line3.empty() && !rating_on_line3_draw && m_line3_visible) {
-    // Truncate line 3 based on panel width (21 chars at minimum, scales up)
+    // Gradually truncate line 3 as panel narrows (~17 chars at minimum width).
+    // Only needed in Scaling mode where the seekbar pushes into the text area.
     int min_w = get_min_size().cx;
-    if (min_w > 0 && m_panel_width > 0) {
+    if (get_nowbar_seekbar_length() == 1 && min_w > 0 && m_panel_width > 0) {
       float w_ratio = static_cast<float>(m_panel_width) / static_cast<float>(min_w);
-      int char_limit = static_cast<int>(16.0f * w_ratio);
-      if (char_limit < 16) char_limit = 16;
+      int char_limit = static_cast<int>(17.0f + 32.0f * (w_ratio - 1.0f));
+      if (char_limit < 17) char_limit = 17;
       if (line3.length() > static_cast<size_t>(char_limit)) {
         line3 = line3.substr(0, char_limit > 1 ? char_limit - 1 : 0) + L"\u2026";
       }
@@ -2743,7 +2734,7 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
     Gdiplus::RectF line3Rect(
         (float)m_rect_track_info.left,
         artistRect.Y + (float)artist_h + (float)text_gap,
-        artist_w,
+        text_w,
         (float)line3_font_h);
     g.DrawString(line3.c_str(), -1, m_font_line3.get(), line3Rect, &sf,
                  line3BrushPtr);
