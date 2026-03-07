@@ -1056,6 +1056,7 @@ void ControlPanelCore::create_blurred_artwork(int target_width, int target_heigh
 void ControlPanelCore::update_layout(const RECT &rect) {
   int w = rect.right - rect.left;
   int h = rect.bottom - rect.top;
+  m_panel_width = w;
   int y_center = rect.top + h / 2;
 
   // Artwork (left side) - size based on panel height with margins
@@ -1551,6 +1552,18 @@ void ControlPanelCore::update_layout(const RECT &rect) {
   int text_gap = static_cast<int>(4 * m_dpi_scale);
   bool rating_on_line3 = (get_nowbar_rating_mode() == 2);
   bool line3_active = !rating_on_line3 && (get_nowbar_line3_format().get_length() > 0);
+  // Hide line 3 when panel height is reduced by more than 10% from default
+  bool line3_height_ok = (h >= static_cast<int>(m_metrics.panel_height * 0.90f));
+  if (!line3_height_ok) {
+    line3_active = false;
+    rating_on_line3 = false;
+  }
+  m_line3_visible = line3_active || rating_on_line3;
+  if (!m_line3_visible && get_nowbar_rating_mode() == 2) {
+    // Clear stale rating rects when line 3 is suppressed by height
+    m_rect_rating = {};
+    for (int i = 0; i < 5; i++) m_rect_stars[i] = {};
+  }
   int line3_h = line3_active ? (line3_font_h + text_gap) : 0;
   int rating_line_h = rating_on_line3 ? (artist_h + text_gap) : 0;
   int info_height = title_h + artist_h + text_gap + line3_h + rating_line_h;
@@ -2702,7 +2715,18 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   }
 
   bool rating_on_line3_draw = (get_nowbar_rating_mode() == 2);
-  if (!line3.empty() && !rating_on_line3_draw) {
+  if (!line3.empty() && !rating_on_line3_draw && m_line3_visible) {
+    // Truncate line 3 based on panel width (21 chars at minimum, scales up)
+    int min_w = get_min_size().cx;
+    if (min_w > 0 && m_panel_width > 0) {
+      float w_ratio = static_cast<float>(m_panel_width) / static_cast<float>(min_w);
+      int char_limit = static_cast<int>(16.0f * w_ratio);
+      if (char_limit < 16) char_limit = 16;
+      if (line3.length() > static_cast<size_t>(char_limit)) {
+        line3 = line3.substr(0, char_limit > 1 ? char_limit - 1 : 0) + L"\u2026";
+      }
+    }
+
     int line3_font_h = m_line3_font_height > 0
         ? m_line3_font_height
         : static_cast<int>(m_metrics.text_height);
@@ -2726,7 +2750,7 @@ void ControlPanelCore::draw_track_info(Gdiplus::Graphics &g) {
   }
 
   // Rating stars on Line 3 mode — draw within track info area (only when a track is loaded)
-  if (get_nowbar_rating_mode() == 2 && (m_state.is_playing || m_state.is_paused)) {
+  if (get_nowbar_rating_mode() == 2 && m_line3_visible && (m_state.is_playing || m_state.is_paused)) {
     Gdiplus::Color ratingAccentColor(255, 255, 193, 7);  // Material Design Amber
 
     // Determine secondary color for unrated stars (same logic as draw_playback_buttons)
