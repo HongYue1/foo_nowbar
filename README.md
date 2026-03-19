@@ -4,14 +4,12 @@
 
 # foo_nowbar
 
-<p align="right">
+<p align="center">
   <!-- 徽章组：版本 | 下载 | 支持 -->
   <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/v/release/jame25/foo_nowbar?style=flat-square&label=Release&color=blue" alt="Latest Version"></a>
   <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/downloads/jame25/foo_nowbar/total?style=flat-square&label=Downloads&color=success" alt="Total Downloads"></a>
   <a href="https://ko-fi.com/Jame25"><img src="https://img.shields.io/badge/Support%20me%20on-Ko--fi-FF5E5B?style=flat-square&logo=kofi&logoColor=white" alt="Support me on Ko-fi"></a>
 </p>
-
----
 
 A foobar2000 component that provides a "Now Playing" control panel for both Default UI and Columns UI.
 
