@@ -1,8 +1,12 @@
 <p align="right">
+  <!-- 徽章组：版本 | 下载 | 支持 | 社区 -->
+  <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/v/release/jame25/foo_nowbar?style=flat-square&label=最新版本&color=blue" alt="最新版本"></a>
+  <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/downloads/jame25/foo_nowbar/total?style=flat-square&label=下载次数&color=success" alt="下载次数"></a>
+  <a href="https://ko-fi.com/Jame25"><img src="https://img.shields.io/badge/在%20Ko--fi%20上支持我-FF5E5B?style=flat-square&logo=kofi&logoColor=white" alt="在Ko-fi上支持我"></a>
+  <a href="https://discord.gg/YB5D5t3x"><img src="https://img.shields.io/discord/YOUR_DISCORD_SERVER_ID?style=flat-square&logo=discord&label=Discord&color=5865F2" alt="Discord"></a>
+  <span> | </span>
   <b>简体中文</b> | <a href="README.md">English</a>
 </p>
-
----
 
 # foo_nowbar
 
@@ -109,8 +113,13 @@
 
 ## 安装方法
 
-1. **安装版 foobar2000 且关联了文件格式**：双击 `foo_nowbar*.fb2k-component` 文件安装；<br>
-   **便携版 foobar2000**：通过 foobar2000 参数选项 - 组件页面，点击安装按钮，选择 `foo_nowbar*.fb2k-component` 文件，点击确定。
+1. **安装版 foobar2000**（已关联文件格式）：双击 `foo_nowbar*.fb2k-component` 文件安装<br>
+   **便携版 foobar2000**：参数选项 → 组件 → 点击“安装” → 选择 `foo_nowbar*.fb2k-component` 文件 → 确定<br>
+   
+   **Releases 页面附件说明：**<br>
+   - `foo_nowbar*.fb2k-component`：英文版<br>
+   - `foo_nowbar-zh-CN*.fb2k-component`：中文版
+   
 2. 重启 foobar2000。
 3. 添加面板：
    - **默认界面 (DUI)**：视图 → 布局 → 启用布局编辑模式 → 添加面板 → "播放控制面板"。

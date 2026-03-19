@@ -1,11 +1,11 @@
 <p align="right">
+  <!-- 徽章组：版本 | 下载 | 支持 | 社区 -->
+  <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/v/release/jame25/foo_nowbar?style=flat-square&label=Release&color=blue" alt="Latest Version"></a>
+  <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/downloads/jame25/foo_nowbar/total?style=flat-square&label=Downloads&color=success" alt="Total Downloads"></a>
+  <a href="https://ko-fi.com/Jame25"><img src="https://img.shields.io/badge/Support%20me%20on-Ko--fi-FF5E5B?style=flat-square&logo=kofi&logoColor=white" alt="Support me on Ko-fi"></a>
+  <a href="https://discord.gg/YB5D5t3x"><img src="https://img.shields.io/discord/YOUR_DISCORD_SERVER_ID?style=flat-square&logo=discord&label=Discord&color=5865F2" alt="Discord"></a>
+  <span> | </span>
   <a href="README-zh-CN.md">简体中文</a> | <b>English</b>
-</p>
-
-<!-- 在这里插入徽章 -->
-<p align="center">
-  <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/v/release/jame25/foo_nowbar?style=flat-square&label=Latest%20Version&color=blue" alt="Latest%20Version"></a>
-  <a href="https://github.com/jame25/foo_nowbar/releases"><img src="https://img.shields.io/github/downloads/jame25/foo_nowbar/total?style=flat-square&label=Total%20Downloads&color=success" alt="Total%20Downloads"></a>
 </p>
 
 # foo_nowbar
