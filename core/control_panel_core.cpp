@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "control_panel_core.h"
 #include "../preferences.h"
+#include "../nowbar_color_service.h"
 #include "../resource.h"
 #include <algorithm>
 #include <commdlg.h>
@@ -101,6 +102,11 @@ void ControlPanelCore::unregister_instance(ControlPanelCore *instance) {
   g_instances.erase(
       std::remove(g_instances.begin(), g_instances.end(), instance),
       g_instances.end());
+}
+
+ControlPanelCore* ControlPanelCore::get_first_instance() {
+    std::lock_guard<std::mutex> lock(g_instances_mutex);
+    return g_instances.empty() ? nullptr : g_instances.front();
 }
 
 void ControlPanelCore::notify_theme_changed() {
@@ -592,6 +598,7 @@ void ControlPanelCore::on_settings_changed() {
 
   // Apply theme based on current settings and playback state
   apply_theme();
+  nowbar_notify_color_changed();
 
   m_waveform_brushes_dirty = true;
 
@@ -893,6 +900,7 @@ void ControlPanelCore::extract_artwork_colors() {
   m_artwork_color_secondary = Gdiplus::Color(255, dark_r, dark_g, dark_b);
   
   m_artwork_colors_valid = true;
+  nowbar_notify_color_changed();
 }
 
 void ControlPanelCore::create_blurred_artwork(int target_width, int target_height) {
@@ -7038,6 +7046,7 @@ void ControlPanelCore::on_playback_state_changed(const PlaybackState &state) {
   bool was_stopped = !was_playing;
   if (was_stopped != is_stopped) {
     apply_theme();
+    nowbar_notify_color_changed();
   }
 
   // Trigger fade animation if playback state changed
@@ -7122,6 +7131,7 @@ void ControlPanelCore::on_track_changed() {
   // Re-apply theme to ensure bg color is fresh (Custom theme depends on
   // playback state for artwork-based backgrounds)
   apply_theme();
+  nowbar_notify_color_changed();
 
   // Update mood state for new track
   update_mood_state();
