@@ -81,6 +81,7 @@ public:
     // Static theme change notification
     static void register_instance(ControlPanelCore* instance);
     static void unregister_instance(ControlPanelCore* instance);
+    static ControlPanelCore* get_first_instance();
     static void notify_theme_changed();
 
     // Shutdown cleanup - must be called during on_quit() before services are gone
@@ -122,6 +123,9 @@ public:
     COLORREF get_bg_colorref() const {
         return RGB(m_bg_color.GetRed(), m_bg_color.GetGreen(), m_bg_color.GetBlue());
     }
+    Gdiplus::Color get_artwork_primary() const { return m_artwork_color_primary; }
+    bool artwork_colors_valid() const { return m_artwork_colors_valid; }
+    bool get_dark_mode() const { return m_dark_mode; }
 
     // Spectrum-only repaint: redraws spectrum, thin progress bar, time display, and buttons
     void paint_spectrum_only(HDC hdc, const RECT& panel_rect);
