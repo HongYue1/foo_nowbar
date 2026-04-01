@@ -1,10 +1,19 @@
 // Include the SDK's component client implementation
 // This provides core_api functions and the foobar2000_get_interface entry point
 
-// Adjust include paths for our project structure
-#include "../columns_ui/foobar2000/SDK/foobar2000.h"
-#include "../columns_ui/foobar2000/SDK/component.h"
-#include "../columns_ui/foobar2000/SDK/cfg_var_legacy.h"
+// Resolve SDK location via the same fallback chain used in pch.h so that
+// both the sibling-folder and lib-subfolder SDK layouts compile correctly.
+#if __has_include("../columns_ui/foobar2000/SDK/foobar2000.h")
+    #include "../columns_ui/foobar2000/SDK/foobar2000.h"
+    #include "../columns_ui/foobar2000/SDK/component.h"
+    #include "../columns_ui/foobar2000/SDK/cfg_var_legacy.h"
+#elif __has_include("lib/columns_ui/foobar2000/SDK/foobar2000.h")
+    #include "lib/columns_ui/foobar2000/SDK/foobar2000.h"
+    #include "lib/columns_ui/foobar2000/SDK/component.h"
+    #include "lib/columns_ui/foobar2000/SDK/cfg_var_legacy.h"
+#else
+    #error "Cannot find foobar2000 SDK for component_client.cpp — checked '../columns_ui' and 'lib/columns_ui'"
+#endif
 
 #ifdef _WIN32
 static HINSTANCE g_hIns;

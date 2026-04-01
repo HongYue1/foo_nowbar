@@ -13,18 +13,26 @@ pfn_foo_artwork_remove_callback g_artwork_remove_callback = nullptr;
 // Module handle for foo_artwork
 static HMODULE g_foo_artwork_module = nullptr;
 
-// Pending artwork from callback
+// Pending artwork from callback — guarded by g_pending_artwork_mutex.
+// artwork_result_callback may fire on any thread; all reads/writes go through the lock.
+static std::mutex g_pending_artwork_mutex;
 static HBITMAP g_pending_artwork_bitmap = nullptr;
 static bool g_has_pending_artwork = false;
 
-// Callback function that receives artwork results from foo_artwork
+// Callback function that receives artwork results from foo_artwork.
+// May be called from any thread — must not touch main-thread-only APIs directly.
 static void artwork_result_callback(bool success, HBITMAP bitmap) {
     if (success && bitmap) {
-        g_pending_artwork_bitmap = bitmap;
-        g_has_pending_artwork = true;
-
-        // Notify all panel instances to refresh artwork
-        nowbar::ControlPanelCore::notify_online_artwork_received();
+        {
+            std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
+            g_pending_artwork_bitmap = bitmap;
+            g_has_pending_artwork = true;
+        }
+        // Marshal the panel notification to the main thread so it can safely
+        // call InvalidateRect and other UI APIs.
+        fb2k::inMainThread([] {
+            nowbar::ControlPanelCore::notify_online_artwork_received();
+        });
     }
 }
 
@@ -69,6 +77,7 @@ void shutdown_artwork_bridge() {
     } else if (g_artwork_set_callback) {
         g_artwork_set_callback(nullptr); // Fallback for older foo_artwork
     }
+    std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
     g_pending_artwork_bitmap = nullptr;
     g_has_pending_artwork = false;
 }
@@ -85,18 +94,23 @@ void request_online_artwork(const char* artist, const char* title) {
     }
 
     // Clear any pending artwork from previous search
-    g_pending_artwork_bitmap = nullptr;
-    g_has_pending_artwork = false;
+    {
+        std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
+        g_pending_artwork_bitmap = nullptr;
+        g_has_pending_artwork = false;
+    }
 
     // Request artwork from foo_artwork
     g_artwork_search(artist, title);
 }
 
 bool has_pending_online_artwork() {
+    std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
     return g_has_pending_artwork;
 }
 
 HBITMAP get_pending_online_artwork() {
+    std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
     HBITMAP bitmap = g_pending_artwork_bitmap;
     g_pending_artwork_bitmap = nullptr;
     g_has_pending_artwork = false;

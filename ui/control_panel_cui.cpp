@@ -23,20 +23,32 @@ void ControlPanelCUI::initialize_core(HWND wnd) {
         m_core->set_color_query_callback([](COLORREF& bg, COLORREF& text, COLORREF& highlight, COLORREF& selection) -> bool {
             try {
                 cui::colours::helper colour_helper;
-                bg = colour_helper.get_colour(cui::colours::colour_background);
-                text = colour_helper.get_colour(cui::colours::colour_text);
-                highlight = colour_helper.get_colour(cui::colours::colour_selection_background);
-                selection = colour_helper.get_colour(cui::colours::colour_selection_background);
+                bg         = colour_helper.get_colour(cui::colours::colour_background);
+                text       = colour_helper.get_colour(cui::colours::colour_text);
+                highlight  = colour_helper.get_colour(cui::colours::colour_active_item_frame);
+                selection  = colour_helper.get_colour(cui::colours::colour_selection_background);
                 return true;
             } catch (...) {
                 return false;
             }
         });
         
-        // Register for CUI colour change notifications
+        // Register for CUI colour change notifications (colour/font palette changes)
         m_colour_callback = std::make_unique<ColourCallback>(this);
         if (fb2k::std_api_try_get(m_colour_manager)) {
             m_colour_manager->register_common_callback(m_colour_callback.get());
+        }
+
+        // v8.0.0: use dark_mode_notifier for SetWindowTheme — cleaner than common_callback
+        m_dark_notifier = std::make_unique<cui::colours::dark_mode_notifier>([wnd, this] {
+            const bool is_dark = cui::colours::is_dark_mode_active();
+            SetWindowTheme(wnd, is_dark ? L"DarkMode_Explorer" : nullptr, nullptr);
+            if (m_core) m_core->on_settings_changed();
+        });
+        // Apply the correct theme immediately on creation
+        {
+            const bool is_dark = cui::colours::is_dark_mode_active();
+            SetWindowTheme(wnd, is_dark ? L"DarkMode_Explorer" : nullptr, nullptr);
         }
         
         // Now initialize (which calls on_settings_changed with callbacks available)
@@ -49,67 +61,9 @@ void ControlPanelCUI::initialize_core(HWND wnd) {
 
 
 void ControlPanelCUI::update_artwork() {
-    if (!m_core) return;
-
-    // Check for pending online artwork from foo_artwork callback
-    if (has_pending_online_artwork()) {
-        HBITMAP bitmap = get_pending_online_artwork();
-        if (bitmap) {
-            m_core->set_artwork_from_hbitmap(bitmap);
-            return;
-        }
-    }
-
-    auto pc = playback_control::get();
-    metadb_handle_ptr track;
-    if (pc->get_now_playing(track) && track.is_valid()) {
-        // Try local/embedded artwork first
-        auto art_manager = album_art_manager_v3::get();
-        try {
-            auto extractor = art_manager->open(
-                pfc::list_single_ref_t<metadb_handle_ptr>(track),
-                pfc::list_single_ref_t<GUID>(album_art_ids::cover_front),
-                fb2k::noAbort
-            );
-
-            if (extractor.is_valid()) {
-                album_art_data_ptr data;
-                if (extractor->query(album_art_ids::cover_front, data, fb2k::noAbort)) {
-                    m_core->set_artwork(data);
-                    return;
-                }
-            }
-        } catch (...) {}
-
-        // No local artwork found - try stub image from foobar2000 display settings
-        bool stub_set = false;
-        try {
-            auto stub_extractor = art_manager->open_stub(fb2k::noAbort);
-            album_art_data_ptr stub_data;
-            if (stub_extractor->query(album_art_ids::cover_front, stub_data, fb2k::noAbort)) {
-                m_core->set_artwork(stub_data);
-                stub_set = true;
-            }
-        } catch (...) {}
-
-        // Try online via foo_artwork if enabled (may override stub)
-        if (get_nowbar_online_artwork() && is_artwork_bridge_available()) {
-            pfc::string8 artist, title;
-            service_ptr_t<titleformat_object> script_artist, script_title;
-            titleformat_compiler::get()->compile_safe(script_artist, "%artist%");
-            titleformat_compiler::get()->compile_safe(script_title, "%title%");
-            // Use playback_format_title for streams - it merges dynamic stream metadata
-            pc->playback_format_title(nullptr, artist, script_artist, nullptr, playback_control::display_level_all);
-            pc->playback_format_title(nullptr, title, script_title, nullptr, playback_control::display_level_all);
-            request_online_artwork(artist.c_str(), title.c_str());
-            // Don't clear artwork - stub or previous art shows while waiting
-            return;
-        }
-
-        if (stub_set) return;
-    }
-
-    m_core->clear_artwork();
+    // All artwork logic lives in ControlPanelCore::update_artwork() to avoid
+    // duplication between the CUI and DUI wrappers.
+    if (m_core) m_core->update_artwork();
 }
 
 LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -119,6 +73,8 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
         
     case WM_DESTROY:
+        // Tear down dark-mode notifier before anything else
+        m_dark_notifier.reset();
         // Unregister colour callback before destroying
         if (m_colour_manager.is_valid() && m_colour_callback) {
             m_colour_manager->deregister_common_callback(m_colour_callback.get());
@@ -248,7 +204,14 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             m_core->on_settings_changed();
         }
         return 0;
-        
+
+    case WM_DPICHANGED: {
+        int new_dpi = HIWORD(wp);
+        if (m_core) m_core->update_dpi(static_cast<float>(new_dpi) / 96.0f);
+        InvalidateRect(wnd, nullptr, FALSE);
+        return 0;
+    }
+
     case ControlPanelCore::WM_NOWBAR_ANIMATE: {
         // Thread-pool timer fired — release the one-shot handle, invalidate,
         // and force an immediate paint so it isn't delayed by low-priority

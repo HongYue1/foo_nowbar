@@ -77,6 +77,9 @@ public:
     void set_dark_mode(bool dark);
     void update_dpi(float scale);
     void set_artwork_request_callback(ArtworkRequestCallback cb) { m_artwork_request_cb = cb; }
+    // Called after on_settings_changed() so the UI host can re-query min/max layout info.
+    using RelayoutCallback = std::function<void()>;
+    void set_relayout_callback(RelayoutCallback cb) { m_relayout_cb = cb; }
     
     // Static theme change notification
     static void register_instance(ControlPanelCore* instance);
@@ -109,6 +112,13 @@ public:
     void set_artwork(album_art_data_ptr data);
     void set_artwork_from_hbitmap(HBITMAP bitmap);  // For online artwork from foo_artwork
     void clear_artwork();
+
+    // Shared artwork-update logic used by both CUI and DUI wrappers.
+    // Checks pending online artwork, falls back to local/embedded art, then the
+    // stub image, and finally requests online art via foo_artwork if enabled.
+    // The cached titleformat scripts are stored here so they're compiled once across
+    // all artwork update calls for the lifetime of the core.
+    void update_artwork();
     
     // Get minimum size
     SIZE get_min_size() const;
@@ -184,7 +194,12 @@ public:
     static void notify_online_artwork_received();
     void on_online_artwork_received();
     
-    // Custom color scheme support (for DUI color sync)
+    // Custom color scheme support (for DUI color sync).
+    // Callback parameter semantics:
+    //   bg        — panel background color
+    //   text      — primary text color
+    //   highlight — active item / focus indicator color (CUI: active_item_frame; DUI: ui_color_highlight)
+    //   selection — selection background color (CUI: selection_background; DUI: ui_color_selection)
     using ColorQueryCallback = std::function<bool(COLORREF& bg, COLORREF& text, COLORREF& highlight, COLORREF& selection)>;
     void set_color_query_callback(ColorQueryCallback callback);
     void apply_custom_colors();  // Called when theme mode is "Custom"
@@ -586,6 +601,9 @@ private:
 
     // Artwork request callback
     ArtworkRequestCallback m_artwork_request_cb;
+    // Relayout callback — called at the end of on_settings_changed() so UI hosts
+    // (e.g. DUI) can call on_min_max_info_change() when button visibility changes.
+    RelayoutCallback m_relayout_cb;
     
     // Color query callback (for DUI custom colors)
     ColorQueryCallback m_color_query_cb;
@@ -594,6 +612,9 @@ private:
     titleformat_object::ptr m_titleformat_line1;
     titleformat_object::ptr m_titleformat_line2;
     titleformat_object::ptr m_titleformat_line3;
+    // Cached artwork lookup scripts — compiled once, reused every update_artwork() call
+    titleformat_object::ptr m_tf_artist;
+    titleformat_object::ptr m_tf_title;
     titleformat_object::ptr m_titleformat_rating; // Cached compiled "%rating%"
     pfc::string8 m_formatted_line1;
     pfc::string8 m_formatted_line2;

@@ -18,6 +18,9 @@ DECLARE_COMPONENT_VERSION(
 // Prevent component from being unloaded (required for proper cleanup)
 VALIDATE_COMPONENT_FILENAME("foo_nowbar.dll");
 
+// Enable cfg_var downgrade when users roll back their foobar2000 version
+FOOBAR2000_IMPLEMENT_CFG_VAR_DOWNGRADE;
+
 // GDI+ initialization
 namespace {
     ULONG_PTR g_gdiplusToken = 0;

@@ -52,7 +52,6 @@ bool get_nowbar_vis_60fps();
 COLORREF get_nowbar_waveform_color();
 COLORREF get_nowbar_waveform_unplayed_color();
 int get_nowbar_waveform_width();     // 0=Thin, 1=Normal, 2=Wide
-int get_nowbar_skip_low_rating_threshold();  // 1, 2, or 3 (skip if rating <= threshold)
 int get_nowbar_background_style();  // 0=Solid, 1=Artwork Colors, 2=Blurred Artwork
 bool get_nowbar_smooth_animations_enabled();  // true=Enabled, false=Disabled
 COLORREF get_nowbar_button_accent_color();    // Button accent color for shuffle/repeat

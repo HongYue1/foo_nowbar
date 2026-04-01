@@ -51,6 +51,9 @@
     <ClCompile Include="component.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="guids.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="artwork_bridge.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

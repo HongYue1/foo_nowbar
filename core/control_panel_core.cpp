@@ -2,6 +2,7 @@
 #include "control_panel_core.h"
 #include "../preferences.h"
 #include "../nowbar_color_service.h"
+#include "../artwork_bridge.h"
 #include "../resource.h"
 #include <algorithm>
 #include <commdlg.h>
@@ -674,6 +675,10 @@ void ControlPanelCore::on_settings_changed() {
 
   // Repaint to reflect any visual changes
   invalidate();
+
+  // Notify the UI host that layout constraints may have changed (e.g. button
+  // visibility toggled, affecting minimum panel width in DUI).
+  if (m_relayout_cb) m_relayout_cb();
 }
 
 void ControlPanelCore::set_color_query_callback(ColorQueryCallback callback) {
@@ -7274,6 +7279,69 @@ void ControlPanelCore::clear_artwork() {
   m_bg_cache_valid = false;  // Invalidate cache when artwork cleared
   invalidate();
 }
+
+void ControlPanelCore::update_artwork() {
+  // Check for pending online artwork from foo_artwork callback
+  if (::has_pending_online_artwork()) {
+    HBITMAP bitmap = ::get_pending_online_artwork();
+    if (bitmap) {
+      set_artwork_from_hbitmap(bitmap);
+      return;
+    }
+  }
+
+  auto pc = playback_control::get();
+  metadb_handle_ptr track;
+  if (pc->get_now_playing(track) && track.is_valid()) {
+    // Try local/embedded artwork first
+    auto art_manager = album_art_manager_v3::get();
+    try {
+      auto extractor = art_manager->open(
+          pfc::list_single_ref_t<metadb_handle_ptr>(track),
+          pfc::list_single_ref_t<GUID>(album_art_ids::cover_front),
+          fb2k::noAbort);
+      if (extractor.is_valid()) {
+        album_art_data_ptr data;
+        if (extractor->query(album_art_ids::cover_front, data, fb2k::noAbort)) {
+          set_artwork(data);
+          return;
+        }
+      }
+    } catch (...) {}
+
+    // No local artwork — try stub image from foobar2000 display settings
+    bool stub_set = false;
+    try {
+      auto stub_extractor = art_manager->open_stub(fb2k::noAbort);
+      album_art_data_ptr stub_data;
+      if (stub_extractor->query(album_art_ids::cover_front, stub_data, fb2k::noAbort)) {
+        set_artwork(stub_data);
+        stub_set = true;
+      }
+    } catch (...) {}
+
+    // Try online via foo_artwork if enabled (may override stub)
+    if (get_nowbar_online_artwork() && ::is_artwork_bridge_available()) {
+      pfc::string8 artist, title;
+      // Compile once and cache — these scripts never change
+      if (!m_tf_artist.is_valid())
+        titleformat_compiler::get()->compile_safe(m_tf_artist, "%artist%");
+      if (!m_tf_title.is_valid())
+        titleformat_compiler::get()->compile_safe(m_tf_title, "%title%");
+      // Use playback_format_title for streams — it merges dynamic stream metadata
+      pc->playback_format_title(nullptr, artist, m_tf_artist, nullptr, playback_control::display_level_all);
+      pc->playback_format_title(nullptr, title,  m_tf_title,  nullptr, playback_control::display_level_all);
+      ::request_online_artwork(artist.c_str(), title.c_str());
+      // Don't clear artwork — stub or previous art shows while waiting
+      return;
+    }
+
+    if (stub_set) return;
+  }
+
+  clear_artwork();
+}
+
 
 void ControlPanelCore::invalidate() {
   m_needs_full_repaint = true;

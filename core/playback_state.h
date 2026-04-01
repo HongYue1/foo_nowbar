@@ -53,17 +53,17 @@ private:
     PlaybackStateManager();
     ~PlaybackStateManager();
     
-    // play_callback overrides
-    void on_playback_starting(play_control::t_track_command p_command, bool p_paused) override;
-    void on_playback_new_track(metadb_handle_ptr p_track) override;
-    void on_playback_stop(play_control::t_stop_reason p_reason) override;
-    void on_playback_seek(double p_time) override;
-    void on_playback_pause(bool p_state) override;
-    void on_playback_time(double p_time) override;
-    void on_volume_change(float p_new_val) override;
-    void on_playback_edited(metadb_handle_ptr p_track) override {}
-    void on_playback_dynamic_info(const file_info& p_info) override {}
-    void on_playback_dynamic_info_track(const file_info& p_info) override;
+    // play_callback overrides — all must be noexcept; bodies wrapped in try/catch
+    void on_playback_starting(play_control::t_track_command p_command, bool p_paused) noexcept override;
+    void on_playback_new_track(metadb_handle_ptr p_track) noexcept override;
+    void on_playback_stop(play_control::t_stop_reason p_reason) noexcept override;
+    void on_playback_seek(double p_time) noexcept override;
+    void on_playback_pause(bool p_state) noexcept override;
+    void on_playback_time(double p_time) noexcept override;
+    void on_volume_change(float p_new_val) noexcept override;
+    void on_playback_edited(metadb_handle_ptr p_track) noexcept override {}
+    void on_playback_dynamic_info(const file_info& p_info) noexcept override {}
+    void on_playback_dynamic_info_track(const file_info& p_info) noexcept override;
     
     void update_track_info(metadb_handle_ptr p_track);
     void notify_state_changed();
@@ -80,6 +80,7 @@ private:
     std::chrono::steady_clock::time_point m_last_infinite_playback_time;  // Debounce for infinite playback
     std::vector<IPlaybackStateCallback*> m_callbacks;
     mutable std::mutex m_mutex;
+    std::mt19937 m_rng{std::random_device{}()};  // Properly seeded RNG for shuffle operations
 
     bool check_and_skip_low_rating(metadb_handle_ptr p_track);  // Check rating and skip if needed
 };

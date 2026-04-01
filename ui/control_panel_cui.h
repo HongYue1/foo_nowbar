@@ -52,18 +52,18 @@ private:
     class ColourCallback : public cui::colours::common_callback {
     public:
         ColourCallback(ControlPanelCUI* owner) : m_owner(owner) {}
-        
+        ~ColourCallback() = default;
+
         void on_colour_changed(uint32_t changed_items_mask) const override {
             if (m_owner && m_owner->m_core) {
                 m_owner->m_core->on_settings_changed();
             }
         }
         
-        void on_bool_changed(uint32_t changed_items_mask) const override {
-            // Dark mode change - also triggers on_settings_changed
-            if ((changed_items_mask & cui::colours::bool_flag_dark_mode_enabled) && m_owner && m_owner->m_core) {
-                m_owner->m_core->on_settings_changed();
-            }
+        void on_bool_changed(uint32_t /*changed_items_mask*/) const override {
+            // Dark mode changes are handled by m_dark_notifier (cui::colours::dark_mode_notifier).
+            // Calling on_settings_changed() here would double-fire it on every dark mode toggle
+            // because the notifier and this callback both observe the same flag. No-op.
         }
         
     private:
@@ -72,6 +72,9 @@ private:
     
     std::unique_ptr<ColourCallback> m_colour_callback;
     cui::colours::manager::ptr m_colour_manager;
+
+    // v8.0.0 dark-mode notifier — handles SetWindowTheme without a full common_callback
+    std::unique_ptr<cui::colours::dark_mode_notifier> m_dark_notifier;
     
     void initialize_core(HWND wnd);
     void update_artwork();

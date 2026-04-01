@@ -33,7 +33,8 @@ private:
     LRESULT handle_message(UINT msg, WPARAM wp, LPARAM lp);
     
     void update_artwork();
-    
+    void release_gdi_cache();  // Free offscreen DC and bitmap; safe to call multiple times.
+
     static const wchar_t* get_class_name();
     static bool register_class();
     

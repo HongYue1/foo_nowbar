@@ -3300,6 +3300,55 @@ static void update_all_cbutton_path_states(HWND hwnd) {
     update_cbutton_path_state(hwnd, IDC_CBUTTON6_ACTION, IDC_CBUTTON6_PATH, IDC_CBUTTON6_BROWSE);
 }
 
+// Refresh all Custom Button tab controls from the current cfg_* values.
+// Called after any profile switch, create, delete, or import to avoid
+// repeating ~80 lines of CheckDlgButton/SendMessage/uSetDlgItemText in four places.
+static void RefreshCButtonUI(HWND hwnd) {
+    CheckDlgButton(hwnd, IDC_CBUTTON1_ENABLE, cfg_cbutton1_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CBUTTON2_ENABLE, cfg_cbutton2_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CBUTTON3_ENABLE, cfg_cbutton3_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CBUTTON4_ENABLE, cfg_cbutton4_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CBUTTON5_ENABLE, cfg_cbutton5_enabled ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(hwnd, IDC_CBUTTON6_ENABLE, cfg_cbutton6_enabled ? BST_CHECKED : BST_UNCHECKED);
+    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON1_ACTION), CB_SETCURSEL, cfg_cbutton1_action, 0);
+    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON2_ACTION), CB_SETCURSEL, cfg_cbutton2_action, 0);
+    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON3_ACTION), CB_SETCURSEL, cfg_cbutton3_action, 0);
+    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON4_ACTION), CB_SETCURSEL, cfg_cbutton4_action, 0);
+    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON5_ACTION), CB_SETCURSEL, cfg_cbutton5_action, 0);
+    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON6_ACTION), CB_SETCURSEL, cfg_cbutton6_action, 0);
+    uSetDlgItemText(hwnd, IDC_CBUTTON1_PATH, cfg_cbutton1_path);
+    uSetDlgItemText(hwnd, IDC_CBUTTON2_PATH, cfg_cbutton2_path);
+    uSetDlgItemText(hwnd, IDC_CBUTTON3_PATH, cfg_cbutton3_path);
+    uSetDlgItemText(hwnd, IDC_CBUTTON4_PATH, cfg_cbutton4_path);
+    uSetDlgItemText(hwnd, IDC_CBUTTON5_PATH, cfg_cbutton5_path);
+    uSetDlgItemText(hwnd, IDC_CBUTTON6_PATH, cfg_cbutton6_path);
+    uSetDlgItemText(hwnd, IDC_CBUTTON1_ICON, cfg_cbutton1_icon);
+    uSetDlgItemText(hwnd, IDC_CBUTTON2_ICON, cfg_cbutton2_icon);
+    uSetDlgItemText(hwnd, IDC_CBUTTON3_ICON, cfg_cbutton3_icon);
+    uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
+    uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
+    uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
+    uSetDlgItemText(hwnd, IDC_CBUTTON1_FONT, cfg_cbutton1_font);
+    uSetDlgItemText(hwnd, IDC_CBUTTON2_FONT, cfg_cbutton2_font);
+    uSetDlgItemText(hwnd, IDC_CBUTTON3_FONT, cfg_cbutton3_font);
+    uSetDlgItemText(hwnd, IDC_CBUTTON4_FONT, cfg_cbutton4_font);
+    uSetDlgItemText(hwnd, IDC_CBUTTON5_FONT, cfg_cbutton5_font);
+    uSetDlgItemText(hwnd, IDC_CBUTTON6_FONT, cfg_cbutton6_font);
+    SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
+    SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
+    SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
+    SetDlgItemInt(hwnd, IDC_CBUTTON4_GLYPH_SIZE, cfg_cbutton4_glyph_size, FALSE);
+    SetDlgItemInt(hwnd, IDC_CBUTTON5_GLYPH_SIZE, cfg_cbutton5_glyph_size, FALSE);
+    SetDlgItemInt(hwnd, IDC_CBUTTON6_GLYPH_SIZE, cfg_cbutton6_glyph_size, FALSE);
+    uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
+    uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
+    uSetDlgItemText(hwnd, IDC_CBUTTON3_LABEL, cfg_cbutton3_label);
+    uSetDlgItemText(hwnd, IDC_CBUTTON4_LABEL, cfg_cbutton4_label);
+    uSetDlgItemText(hwnd, IDC_CBUTTON5_LABEL, cfg_cbutton5_label);
+    uSetDlgItemText(hwnd, IDC_CBUTTON6_LABEL, cfg_cbutton6_label);
+    update_all_cbutton_path_states(hwnd);
+}
+
 INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     nowbar_preferences* p_this = nullptr;
     
@@ -3923,49 +3972,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     set_current_profile_name(profiles[sel].name.c_str());
                     
                     // Update UI controls with new profile settings
-                    CheckDlgButton(hwnd, IDC_CBUTTON1_ENABLE, cfg_cbutton1_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON2_ENABLE, cfg_cbutton2_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON3_ENABLE, cfg_cbutton3_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON4_ENABLE, cfg_cbutton4_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON5_ENABLE, cfg_cbutton5_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON6_ENABLE, cfg_cbutton6_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON1_ACTION), CB_SETCURSEL, cfg_cbutton1_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON2_ACTION), CB_SETCURSEL, cfg_cbutton2_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON3_ACTION), CB_SETCURSEL, cfg_cbutton3_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON4_ACTION), CB_SETCURSEL, cfg_cbutton4_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON5_ACTION), CB_SETCURSEL, cfg_cbutton5_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON6_ACTION), CB_SETCURSEL, cfg_cbutton6_action, 0);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_PATH, cfg_cbutton1_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_PATH, cfg_cbutton2_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_PATH, cfg_cbutton3_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_PATH, cfg_cbutton4_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_PATH, cfg_cbutton5_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_PATH, cfg_cbutton6_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_ICON, cfg_cbutton1_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_ICON, cfg_cbutton2_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_ICON, cfg_cbutton3_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_FONT, cfg_cbutton1_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_FONT, cfg_cbutton2_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_FONT, cfg_cbutton3_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_FONT, cfg_cbutton4_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_FONT, cfg_cbutton5_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_FONT, cfg_cbutton6_font);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON4_GLYPH_SIZE, cfg_cbutton4_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON5_GLYPH_SIZE, cfg_cbutton5_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON6_GLYPH_SIZE, cfg_cbutton6_glyph_size, FALSE);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_LABEL, cfg_cbutton3_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_LABEL, cfg_cbutton4_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_LABEL, cfg_cbutton5_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_LABEL, cfg_cbutton6_label);
-                    update_all_cbutton_path_states(hwnd);
+                    RefreshCButtonUI(hwnd);
                     p_this->on_changed();
                 }
             }
@@ -4119,49 +4126,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                     SendMessage(hCombo, CB_SETCURSEL, 0, 0);
                     
                     // Update UI with new profile settings
-                    CheckDlgButton(hwnd, IDC_CBUTTON1_ENABLE, cfg_cbutton1_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON2_ENABLE, cfg_cbutton2_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON3_ENABLE, cfg_cbutton3_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON4_ENABLE, cfg_cbutton4_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON5_ENABLE, cfg_cbutton5_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    CheckDlgButton(hwnd, IDC_CBUTTON6_ENABLE, cfg_cbutton6_enabled ? BST_CHECKED : BST_UNCHECKED);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON1_ACTION), CB_SETCURSEL, cfg_cbutton1_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON2_ACTION), CB_SETCURSEL, cfg_cbutton2_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON3_ACTION), CB_SETCURSEL, cfg_cbutton3_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON4_ACTION), CB_SETCURSEL, cfg_cbutton4_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON5_ACTION), CB_SETCURSEL, cfg_cbutton5_action, 0);
-                    SendMessage(GetDlgItem(hwnd, IDC_CBUTTON6_ACTION), CB_SETCURSEL, cfg_cbutton6_action, 0);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_PATH, cfg_cbutton1_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_PATH, cfg_cbutton2_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_PATH, cfg_cbutton3_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_PATH, cfg_cbutton4_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_PATH, cfg_cbutton5_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_PATH, cfg_cbutton6_path);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_ICON, cfg_cbutton1_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_ICON, cfg_cbutton2_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_ICON, cfg_cbutton3_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_FONT, cfg_cbutton1_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_FONT, cfg_cbutton2_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_FONT, cfg_cbutton3_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_FONT, cfg_cbutton4_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_FONT, cfg_cbutton5_font);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_FONT, cfg_cbutton6_font);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON4_GLYPH_SIZE, cfg_cbutton4_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON5_GLYPH_SIZE, cfg_cbutton5_glyph_size, FALSE);
-                    SetDlgItemInt(hwnd, IDC_CBUTTON6_GLYPH_SIZE, cfg_cbutton6_glyph_size, FALSE);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON3_LABEL, cfg_cbutton3_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON4_LABEL, cfg_cbutton4_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON5_LABEL, cfg_cbutton5_label);
-                    uSetDlgItemText(hwnd, IDC_CBUTTON6_LABEL, cfg_cbutton6_label);
-                    update_all_cbutton_path_states(hwnd);
+                    RefreshCButtonUI(hwnd);
                     p_this->on_changed();
                     break;
                 }
@@ -4244,49 +4209,7 @@ INT_PTR CALLBACK nowbar_preferences::ConfigProc(HWND hwnd, UINT msg, WPARAM wp, 
                             SendMessage(hCombo, CB_SETCURSEL, new_sel, 0);
                             
                             // Update UI
-                            CheckDlgButton(hwnd, IDC_CBUTTON1_ENABLE, cfg_cbutton1_enabled ? BST_CHECKED : BST_UNCHECKED);
-                            CheckDlgButton(hwnd, IDC_CBUTTON2_ENABLE, cfg_cbutton2_enabled ? BST_CHECKED : BST_UNCHECKED);
-                            CheckDlgButton(hwnd, IDC_CBUTTON3_ENABLE, cfg_cbutton3_enabled ? BST_CHECKED : BST_UNCHECKED);
-                            CheckDlgButton(hwnd, IDC_CBUTTON4_ENABLE, cfg_cbutton4_enabled ? BST_CHECKED : BST_UNCHECKED);
-                            CheckDlgButton(hwnd, IDC_CBUTTON5_ENABLE, cfg_cbutton5_enabled ? BST_CHECKED : BST_UNCHECKED);
-                            CheckDlgButton(hwnd, IDC_CBUTTON6_ENABLE, cfg_cbutton6_enabled ? BST_CHECKED : BST_UNCHECKED);
-                            SendMessage(GetDlgItem(hwnd, IDC_CBUTTON1_ACTION), CB_SETCURSEL, cfg_cbutton1_action, 0);
-                            SendMessage(GetDlgItem(hwnd, IDC_CBUTTON2_ACTION), CB_SETCURSEL, cfg_cbutton2_action, 0);
-                            SendMessage(GetDlgItem(hwnd, IDC_CBUTTON3_ACTION), CB_SETCURSEL, cfg_cbutton3_action, 0);
-                            SendMessage(GetDlgItem(hwnd, IDC_CBUTTON4_ACTION), CB_SETCURSEL, cfg_cbutton4_action, 0);
-                            SendMessage(GetDlgItem(hwnd, IDC_CBUTTON5_ACTION), CB_SETCURSEL, cfg_cbutton5_action, 0);
-                            SendMessage(GetDlgItem(hwnd, IDC_CBUTTON6_ACTION), CB_SETCURSEL, cfg_cbutton6_action, 0);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON1_PATH, cfg_cbutton1_path);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON2_PATH, cfg_cbutton2_path);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON3_PATH, cfg_cbutton3_path);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON4_PATH, cfg_cbutton4_path);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON5_PATH, cfg_cbutton5_path);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON6_PATH, cfg_cbutton6_path);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON1_ICON, cfg_cbutton1_icon);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON2_ICON, cfg_cbutton2_icon);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON3_ICON, cfg_cbutton3_icon);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON4_ICON, cfg_cbutton4_icon);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON5_ICON, cfg_cbutton5_icon);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON6_ICON, cfg_cbutton6_icon);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON1_FONT, cfg_cbutton1_font);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON2_FONT, cfg_cbutton2_font);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON3_FONT, cfg_cbutton3_font);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON4_FONT, cfg_cbutton4_font);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON5_FONT, cfg_cbutton5_font);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON6_FONT, cfg_cbutton6_font);
-                            SetDlgItemInt(hwnd, IDC_CBUTTON1_GLYPH_SIZE, cfg_cbutton1_glyph_size, FALSE);
-                            SetDlgItemInt(hwnd, IDC_CBUTTON2_GLYPH_SIZE, cfg_cbutton2_glyph_size, FALSE);
-                            SetDlgItemInt(hwnd, IDC_CBUTTON3_GLYPH_SIZE, cfg_cbutton3_glyph_size, FALSE);
-                            SetDlgItemInt(hwnd, IDC_CBUTTON4_GLYPH_SIZE, cfg_cbutton4_glyph_size, FALSE);
-                            SetDlgItemInt(hwnd, IDC_CBUTTON5_GLYPH_SIZE, cfg_cbutton5_glyph_size, FALSE);
-                            SetDlgItemInt(hwnd, IDC_CBUTTON6_GLYPH_SIZE, cfg_cbutton6_glyph_size, FALSE);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON1_LABEL, cfg_cbutton1_label);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON2_LABEL, cfg_cbutton2_label);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON3_LABEL, cfg_cbutton3_label);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON4_LABEL, cfg_cbutton4_label);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON5_LABEL, cfg_cbutton5_label);
-                            uSetDlgItemText(hwnd, IDC_CBUTTON6_LABEL, cfg_cbutton6_label);
-                            update_all_cbutton_path_states(hwnd);
+                            RefreshCButtonUI(hwnd);
                             p_this->on_changed();
 
                             MessageBoxW(hwnd, L"Profile imported successfully.", L"Import", MB_OK | MB_ICONINFORMATION);

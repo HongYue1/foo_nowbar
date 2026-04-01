@@ -1,11 +1,24 @@
-name: Build Component
+name: Build Component (x86 & x64)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+# =============================================================================
+# 1. Build x86 + x64 (matrix)
+# =============================================================================
+  build-multi-platform:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        platform: [x86, x64]
+        include:
+          - platform: x86
+            msbuild_platform: Win32
+            outdir_platform: x86
+          - platform: x64
+            msbuild_platform: x64
+            outdir_platform: x64
 
     steps:
     # -------------------------------------------------------------------------
@@ -88,48 +101,104 @@ jobs:
     # -------------------------------------------------------------------------
 
     # 3.1 Build PFC
-    - name: Build PFC
-      run: msbuild columns_ui/pfc/pfc.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\pfc\
+    - name: Build PFC (${{ matrix.platform }})
+      shell: cmd
+      run: |
+        msbuild columns_ui\pfc\pfc.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=${{ matrix.outdir_platform }}\pfc\
 
     # 3.2 Build Foobar2000 SDK
     # FORCE OutDir to match what foo_nowbar expects: SDK/x64/foobar2000_SDK/
-    - name: Build Foobar2000 SDK
-      run: msbuild columns_ui/foobar2000/SDK/foobar2000_SDK.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\foobar2000_SDK\
+    - name: Build Foobar2000 SDK (${{ matrix.platform }})
+      shell: cmd
+      run: |
+        msbuild columns_ui\foobar2000\SDK\foobar2000_SDK.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=${{ matrix.outdir_platform }}\foobar2000_SDK\
 
     # 3.3 Build Columns UI SDK
-    - name: Build Columns UI SDK
-      run: msbuild columns_ui/columns_ui-sdk/columns_ui-sdk.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\columns_ui_sdk\
+    - name: Build Columns UI SDK (${{ matrix.platform }})
+      shell: cmd
+      run: |
+        msbuild columns_ui\columns_ui-sdk\columns_ui-sdk.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=${{ matrix.outdir_platform }}\columns_ui_sdk\
 
     # 3.4 Build Shared (Try to find project, or assume built by SDK hooks)
     # Note: If this fails, we may need to build 'foobar2000_component_client' instead.
-    - name: Build Shared
+    - name: Build Shared (${{ matrix.platform }})
+      shell: cmd
       run: |
         if exist columns_ui\foobar2000\shared\shared.vcxproj (
-          msbuild columns_ui\foobar2000\shared\shared.vcxproj /p:Configuration=Release /p:Platform=x64
-        ) else (
-           echo "shared.vcxproj not found, assuming shared.lib is built manually or by other projects."
-           # Attempt to build component_client as a fallback to generate shared objs if needed
-           if exist columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj (
-             msbuild columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj /p:Configuration=Release /p:Platform=x64
-           )
+          msbuild columns_ui\foobar2000\shared\shared.vcxproj ^
+            /p:Configuration=Release ^
+            /p:Platform=${{ matrix.msbuild_platform }}
         )
-      shell: cmd
 
     # -------------------------------------------------------------------------
     # 4. Build Your Component
     # -------------------------------------------------------------------------
-    - name: Build foo_nowbar
-      # We force OutDir to "..\bin\" (relative to project file) so the DLL lands in the repo root/bin
-      run: msbuild foo_nowbar/foo_nowbar.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=..\bin\
-
-    # Debug: List the bin folder to be sure
-    - name: List Output Files
-      run: dir bin
+    - name: Build foo_nowbar (${{ matrix.platform }})
       shell: cmd
+      run: |
+        msbuild foo_nowbar\foo_nowbar.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=..\bin\${{ matrix.outdir_platform }}\
 
-    - name: Upload DLL
+    - name: Upload DLL (${{ matrix.platform }})
       uses: actions/upload-artifact@v4
       with:
-        name: foo_nowbar_dll
-        path: bin/foo_nowbar.dll
+        name: foo_nowbar_${{ matrix.platform }}
+        path: bin/${{ matrix.outdir_platform }}/foo_nowbar.dll
+        if-no-files-found: error
+
+
+# =============================================================================
+# 2. Package → ONE fb2k-component
+# =============================================================================
+  package:
+    runs-on: windows-latest
+    needs: build-multi-platform
+    name: Package fb2k-component
+
+    steps:
+    - name: Download x86 DLL
+      uses: actions/download-artifact@v4
+      with:
+        name: foo_nowbar_x86
+        path: component_temp
+
+    - name: Download x64 DLL
+      uses: actions/download-artifact@v4
+      with:
+        name: foo_nowbar_x64
+        path: component_temp\x64
+
+    - name: Verify structure
+      shell: cmd
+      run: |
+        echo ===== component structure =====
+        dir component_temp /s
+
+    - name: Create fb2k-component
+      shell: python
+      run: |
+        import zipfile, os
+        with zipfile.ZipFile("foo_nowbar.fb2k-component", "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk("component_temp"):
+                for file in files:
+                    abs_path = os.path.join(root, file)
+                    arc_name = os.path.relpath(abs_path, "component_temp").replace("\\", "/")
+                    zf.write(abs_path, arc_name)
+
+    - name: Upload final component
+      uses: actions/upload-artifact@v4
+      with:
+        name: foo_nowbar_component
+        path: foo_nowbar.fb2k-component
         if-no-files-found: error

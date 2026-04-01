@@ -24,9 +24,17 @@ public:
             int pr = primary.GetR(), pg = primary.GetG(), pb = primary.GetB();
             BYTE ov = (bg_style == 1) ? (core->get_dark_mode() ? 120 : 80)
                                        : (core->get_dark_mode() ? 140 : 180);
-            r = static_cast<uint8_t>(pr * (255 - ov) / 255);
-            g = static_cast<uint8_t>(pg * (255 - ov) / 255);
-            b = static_cast<uint8_t>(pb * (255 - ov) / 255);
+            if (core->get_dark_mode()) {
+                // Dark mode: blend artwork color toward black
+                r = static_cast<uint8_t>(pr * (255 - ov) / 255);
+                g = static_cast<uint8_t>(pg * (255 - ov) / 255);
+                b = static_cast<uint8_t>(pb * (255 - ov) / 255);
+            } else {
+                // Light mode: blend artwork color toward white
+                r = static_cast<uint8_t>(pr + (255 - pr) * ov / 255);
+                g = static_cast<uint8_t>(pg + (255 - pg) * ov / 255);
+                b = static_cast<uint8_t>(pb + (255 - pb) * ov / 255);
+            }
         } else {
             COLORREF bg = core->get_bg_colorref();
             r = GetRValue(bg);

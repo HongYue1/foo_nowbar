@@ -14,13 +14,20 @@ bool ControlPanelDUI::register_class() {
     static bool registered = false;
     if (registered) return true;
     
+    // hbrBackground is stored in the WNDCLASSEXW and must outlive the class registration.
+    // We allocate it once here and let it live for the process lifetime (leaked intentionally
+    // at process exit, identical to what the OS would do). Using a solid brush here prevents
+    // a white flash before the first WM_PAINT; WM_ERASEBKGND returns 1 so the OS never
+    // actually paints with this brush during normal operation.
+    static HBRUSH s_bg_brush = CreateSolidBrush(RGB(24, 24, 24));
+
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
     wc.style = CS_DBLCLKS;
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = core_api::get_my_instance();
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = CreateSolidBrush(RGB(24, 24, 24));  // Dark background to prevent white flash
+    wc.hbrBackground = s_bg_brush;
     wc.lpszClassName = get_class_name();
     
     registered = (RegisterClassExW(&wc) != 0);
@@ -37,12 +44,30 @@ ControlPanelDUI::ControlPanelDUI(ui_element_config::ptr config, ui_element_insta
 {
 }
 
+void ControlPanelDUI::release_gdi_cache() {
+    if (m_cache_bitmap) {
+        SelectObject(m_cache_dc, m_cache_old_bitmap);
+        DeleteObject(m_cache_bitmap);
+        m_cache_bitmap = nullptr;
+        m_cache_old_bitmap = nullptr;
+    }
+    if (m_cache_dc) {
+        DeleteDC(m_cache_dc);
+        m_cache_dc = nullptr;
+    }
+    m_cache_w = m_cache_h = 0;
+}
+
 ControlPanelDUI::~ControlPanelDUI() {
     if (m_hwnd) {
+        // Zero GWLP_USERDATA first so WindowProc falls through to DefWindowProc
+        // during WM_DESTROY — avoiding a second m_core.reset() via handle_message.
         SetWindowLongPtr(m_hwnd, GWLP_USERDATA, 0);
         DestroyWindow(m_hwnd);
         m_hwnd = nullptr;
     }
+    // WM_DESTROY is bypassed (self == null by then), so clean up GDI objects here.
+    release_gdi_cache();
 }
 
 void ControlPanelDUI::initialize_window(HWND parent) {
@@ -63,6 +88,10 @@ void ControlPanelDUI::initialize_window(HWND parent) {
 
 void ControlPanelDUI::set_configuration(ui_element_config::ptr data) {
     m_config = data;
+    // Notify the core that settings may have changed, and tell the host to
+    // re-query min/max info (button visibility affects minimum width).
+    if (m_core) m_core->on_settings_changed();
+    if (m_callback.is_valid()) m_callback->on_min_max_info_change();
 }
 
 ui_element_config::ptr ControlPanelDUI::get_configuration() {
@@ -72,15 +101,9 @@ ui_element_config::ptr ControlPanelDUI::get_configuration() {
 ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
     ui_element_min_max_info info;
     
-    // Get DPI for scaling calculations
-    int dpi = 96;
-    if (m_hwnd) {
-        HDC hdc = GetDC(m_hwnd);
-        if (hdc) {
-            dpi = GetDeviceCaps(hdc, LOGPIXELSY);
-            ReleaseDC(m_hwnd, hdc);
-        }
-    }
+    // GetDpiForWindow is a single cheap call (Windows 10+); fall back to 96 if the
+    // window doesn't exist yet (e.g. queried before initialize_window is called).
+    int dpi = (m_hwnd && IsWindow(m_hwnd)) ? static_cast<int>(GetDpiForWindow(m_hwnd)) : 96;
 
     // Minimum height: 0.55 inches, scaled by DPI
     // At 96 DPI: 0.55 * 96 = 53 pixels
@@ -111,67 +134,9 @@ ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
 }
 
 void ControlPanelDUI::update_artwork() {
-    if (!m_core) return;
-
-    // Check for pending online artwork from foo_artwork callback
-    if (has_pending_online_artwork()) {
-        HBITMAP bitmap = get_pending_online_artwork();
-        if (bitmap) {
-            m_core->set_artwork_from_hbitmap(bitmap);
-            return;
-        }
-    }
-
-    auto pc = playback_control::get();
-    metadb_handle_ptr track;
-    if (pc->get_now_playing(track) && track.is_valid()) {
-        // Try local/embedded artwork first
-        auto art_manager = album_art_manager_v3::get();
-        try {
-            auto extractor = art_manager->open(
-                pfc::list_single_ref_t<metadb_handle_ptr>(track),
-                pfc::list_single_ref_t<GUID>(album_art_ids::cover_front),
-                fb2k::noAbort
-            );
-
-            if (extractor.is_valid()) {
-                album_art_data_ptr data;
-                if (extractor->query(album_art_ids::cover_front, data, fb2k::noAbort)) {
-                    m_core->set_artwork(data);
-                    return;
-                }
-            }
-        } catch (...) {}
-
-        // No local artwork found - try stub image from foobar2000 display settings
-        bool stub_set = false;
-        try {
-            auto stub_extractor = art_manager->open_stub(fb2k::noAbort);
-            album_art_data_ptr stub_data;
-            if (stub_extractor->query(album_art_ids::cover_front, stub_data, fb2k::noAbort)) {
-                m_core->set_artwork(stub_data);
-                stub_set = true;
-            }
-        } catch (...) {}
-
-        // Try online via foo_artwork if enabled (may override stub)
-        if (get_nowbar_online_artwork() && is_artwork_bridge_available()) {
-            pfc::string8 artist, title;
-            service_ptr_t<titleformat_object> script_artist, script_title;
-            titleformat_compiler::get()->compile_safe(script_artist, "%artist%");
-            titleformat_compiler::get()->compile_safe(script_title, "%title%");
-            // Use playback_format_title for streams - it merges dynamic stream metadata
-            pc->playback_format_title(nullptr, artist, script_artist, nullptr, playback_control::display_level_all);
-            pc->playback_format_title(nullptr, title, script_title, nullptr, playback_control::display_level_all);
-            request_online_artwork(artist.c_str(), title.c_str());
-            // Don't clear artwork - stub or previous art shows while waiting
-            return;
-        }
-
-        if (stub_set) return;
-    }
-
-    m_core->clear_artwork();
+    // All artwork logic lives in ControlPanelCore::update_artwork() to avoid
+    // duplication between the CUI and DUI wrappers.
+    if (m_core) m_core->update_artwork();
 }
 
 LRESULT CALLBACK ControlPanelDUI::WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -203,6 +168,12 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
             update_artwork();
         });
         
+        // Signal the DUI host to re-query min/max info whenever settings change
+        // (e.g. button visibility toggles affect minimum panel width).
+        m_core->set_relayout_callback([this]() {
+            if (m_callback.is_valid()) m_callback->on_min_max_info_change();
+        });
+        
         // Set color query callback for Custom theme mode (DUI color scheme sync)
         m_core->set_color_query_callback([this](COLORREF& bg, COLORREF& text, COLORREF& highlight, COLORREF& selection) -> bool {
             if (!m_callback.is_valid()) return false;
@@ -225,10 +196,7 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         
     case WM_DESTROY:
         m_core.reset();
-        // Release cached offscreen bitmap
-        if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
-        if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
-        m_cache_w = m_cache_h = 0;
+        release_gdi_cache();
         return 0;
         
     case WM_SIZE: {
@@ -340,6 +308,18 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
         
+    case WM_SETTINGCHANGE:
+        // System settings changed (accent colour, dark/light mode, etc.)
+        if (m_core) m_core->on_settings_changed();
+        return 0;
+
+    case WM_DPICHANGED: {
+        int new_dpi = HIWORD(wp);
+        if (m_core) m_core->update_dpi(static_cast<float>(new_dpi) / 96.0f);
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+        return 0;
+    }
+
     case ControlPanelCore::WM_NOWBAR_ANIMATE: {
         if (m_core) m_core->on_animation_timer_fired();
         const RECT* dirty = m_core ? m_core->get_animation_dirty_rect() : nullptr;
@@ -373,7 +353,7 @@ public:
     
     ui_element_instance::ptr instantiate(HWND parent, ui_element_config::ptr cfg, ui_element_instance_callback::ptr callback) override {
         PFC_ASSERT(cfg->get_guid() == get_guid());
-        service_ptr_t<ControlPanelDUI> item = new service_impl_t<ControlPanelDUI>(cfg, callback);
+        auto item = fb2k::service_new<ControlPanelDUI>(cfg, callback);
         item->initialize_window(parent);
         return item;
     }

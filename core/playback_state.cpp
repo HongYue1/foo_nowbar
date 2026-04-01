@@ -4,23 +4,28 @@
 
 namespace nowbar {
 
-// Pointer-based singleton to allow explicit destruction during on_quit()
+// Raw-pointer singleton — both constructor and destructor are intentionally
+// private, which makes std::unique_ptr<> (whose default_delete needs public
+// dtor access) unsuitable here without a custom deleter or friend declaration.
+// Explicit new/delete in get()/shutdown() keeps access within this TU.
 static PlaybackStateManager* g_instance = nullptr;
 static bool g_shutdown_called = false;
 
 PlaybackStateManager& PlaybackStateManager::get() {
+    // Main-thread-only: no mutex guards g_instance. All callers must be on the main thread.
+    core_api::ensure_main_thread();
     if (!g_instance && !g_shutdown_called) {
         g_instance = new PlaybackStateManager();
     }
+    // Guard against calls after shutdown() — dereferencing null is UB.
+    PFC_ASSERT(g_instance != nullptr);
     return *g_instance;
 }
 
 void PlaybackStateManager::shutdown() {
     g_shutdown_called = true;
-    if (g_instance) {
-        delete g_instance;
-        g_instance = nullptr;
-    }
+    delete g_instance;
+    g_instance = nullptr;
 }
 
 bool PlaybackStateManager::is_available() {
@@ -69,13 +74,18 @@ void PlaybackStateManager::unregister_callback(IPlaybackStateCallback* cb) {
     );
 }
 
-void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_command, bool p_paused) {
-    m_state.is_playing = true;
-    m_state.is_paused = p_paused;
-    notify_state_changed();
+void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_command, bool p_paused) noexcept {
+    try {
+        m_state.is_playing = true;
+        m_state.is_paused = p_paused;
+        notify_state_changed();
+    } catch (const std::exception& e) {
+        FB2K_console_formatter() << "foo_nowbar: on_playback_starting exception: " << e.what();
+    } catch (...) {}
 }
 
-void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) {
+void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) noexcept {
+    try {
     auto pc = playback_control::get();
     m_state.is_playing = true;
     m_state.is_paused = pc->is_paused();
@@ -103,9 +113,13 @@ void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) {
     // and on_track_changed() handles all track-specific updates (theme, formats,
     // artwork, invalidation).  The redundant state notification was causing
     // evaluate_title_formats() and invalidate() to run a third time per track change.
+    } catch (const std::exception& e) {
+        FB2K_console_formatter() << "foo_nowbar: on_playback_new_track exception: " << e.what();
+    } catch (...) {}
 }
 
-void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason) {
+void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason) noexcept {
+    try {
     // When starting another track (manual next/prev), don't notify UI of "stopped" state
     // The on_playback_new_track() callback will fire immediately after with correct state.
     // Notifying "stopped" here would cause the UI to clear artwork/caches unnecessarily,
@@ -114,9 +128,16 @@ void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason
         return;
     }
 
-    // Handle infinite playback before clearing state
+    // Handle infinite playback before clearing state.
+    // Deferred via fb2k::inMainThread: get_all_items() iterates the full library
+    // synchronously on the main thread.  Posting the lambda here (from the playback
+    // thread) ensures the callback returns first; the library scan runs on the next
+    // main-thread dispatch.  For very large libraries this may briefly stall the UI;
+    // a future optimisation can offload the scan with fb2k::splitTask.
     if (p_reason == play_control::stop_reason_eof && get_nowbar_infinite_playback_enabled()) {
-        handle_infinite_playback();
+        fb2k::inMainThread([this] {
+            if (is_available()) handle_infinite_playback();
+        });
     }
 
     m_state.is_playing = false;
@@ -132,36 +153,48 @@ void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason
     m_state.track_album.reset();
 
     notify_state_changed();
+    } catch (const std::exception& e) {
+        FB2K_console_formatter() << "foo_nowbar: on_playback_stop exception: " << e.what();
+    } catch (...) {}
 }
 
-void PlaybackStateManager::on_playback_seek(double p_time) {
-    m_state.playback_time = p_time;
-    notify_time_changed(p_time);
+void PlaybackStateManager::on_playback_seek(double p_time) noexcept {
+    try {
+        m_state.playback_time = p_time;
+        notify_time_changed(p_time);
+    } catch (...) {}
 }
 
-void PlaybackStateManager::on_playback_pause(bool p_state) {
-    m_state.is_paused = p_state;
-    notify_state_changed();
+void PlaybackStateManager::on_playback_pause(bool p_state) noexcept {
+    try {
+        m_state.is_paused = p_state;
+        notify_state_changed();
+    } catch (...) {}
 }
 
-void PlaybackStateManager::on_playback_time(double p_time) {
+void PlaybackStateManager::on_playback_time(double p_time) noexcept {
     // on_playback_time fires on the audio decoder thread.
     // Marshal to the main thread to avoid data races with UI paint().
     fb2k::inMainThread([p_time]() {
         if (!is_available()) return;
-        auto& mgr = get();
-        mgr.m_state.playback_time = p_time;
-        mgr.notify_time_changed(p_time);
-        mgr.check_preview_skip(p_time);
+        try {
+            auto& mgr = get();
+            mgr.m_state.playback_time = p_time;
+            mgr.notify_time_changed(p_time);
+            mgr.check_preview_skip(p_time);
+        } catch (...) {}
     });
 }
 
-void PlaybackStateManager::on_volume_change(float p_new_val) {
-    m_state.volume_db = p_new_val;
-    notify_volume_changed(p_new_val);
+void PlaybackStateManager::on_volume_change(float p_new_val) noexcept {
+    try {
+        m_state.volume_db = p_new_val;
+        notify_volume_changed(p_new_val);
+    } catch (...) {}
 }
 
-void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_info) {
+void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_info) noexcept {
+    try {
     // Extract metadata from dynamic info (for streaming sources like internet radio)
     const char* title = nullptr;
     const char* artist = nullptr;
@@ -205,6 +238,9 @@ void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_inf
         notify_track_changed();
         notify_state_changed();
     }
+    } catch (const std::exception& e) {
+        FB2K_console_formatter() << "foo_nowbar: on_playback_dynamic_info_track exception: " << e.what();
+    } catch (...) {}
 }
 
 void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
@@ -371,7 +407,8 @@ void PlaybackStateManager::handle_infinite_playback() {
     pfc::list_t<metadb_handle_ptr> fallback_tracks;
 
     // Seed random with current time
-    srand(static_cast<unsigned int>(time(nullptr)));
+    // (Removed: was re-seeding srand() on every call, causing identical sequences.
+    //  Now uses m_rng (std::mt19937 seeded once at construction).)
 
     for (t_size i = 0; i < library_items.get_count(); i++) {
         metadb_handle_ptr track = library_items[i];
@@ -410,9 +447,10 @@ void PlaybackStateManager::handle_infinite_playback() {
 
     // First, add from matching tracks (randomized)
     if (matching_tracks.get_count() > 0) {
-        // Shuffle matching tracks
+        // Shuffle matching tracks using seeded mt19937
         for (t_size i = matching_tracks.get_count() - 1; i > 0; i--) {
-            t_size j = rand() % (i + 1);
+            std::uniform_int_distribution<t_size> dist(0, i);
+            t_size j = dist(m_rng);
             if (i != j) {
                 metadb_handle_ptr temp = matching_tracks[i];
                 matching_tracks.replace_item(i, matching_tracks[j]);
@@ -427,9 +465,10 @@ void PlaybackStateManager::handle_infinite_playback() {
 
     // If we don't have enough, add from fallback (random tracks)
     if (tracks_to_add.get_count() < tracks_to_select && fallback_tracks.get_count() > 0) {
-        // Shuffle fallback tracks
+        // Shuffle fallback tracks using seeded mt19937
         for (t_size i = fallback_tracks.get_count() - 1; i > 0; i--) {
-            t_size j = rand() % (i + 1);
+            std::uniform_int_distribution<t_size> dist(0, i);
+            t_size j = dist(m_rng);
             if (i != j) {
                 metadb_handle_ptr temp = fallback_tracks[i];
                 fallback_tracks.replace_item(i, fallback_tracks[j]);
@@ -453,12 +492,15 @@ void PlaybackStateManager::handle_infinite_playback() {
     mtcm->add_callback(fb2k::service_new<InfinitePlaybackCallback>(insert_position));
 }
 
-// Callback to skip to next track on main thread
-class PreviewSkipCallback : public main_thread_callback {
+// Generic reusable callback that runs an arbitrary lambda on the main thread.
+// Replaces the several near-identical main_thread_callback subclasses that all
+// called playback_control::get()->next().
+class PlaybackCommandCallback : public main_thread_callback {
 public:
-    void callback_run() override {
-        playback_control::get()->next();
-    }
+    explicit PlaybackCommandCallback(std::function<void()> fn) : m_fn(std::move(fn)) {}
+    void callback_run() override { m_fn(); }
+private:
+    std::function<void()> m_fn;
 };
 
 void PlaybackStateManager::check_preview_skip(double current_time) {
@@ -501,17 +543,10 @@ void PlaybackStateManager::check_preview_skip(double current_time) {
 
         // Skip to next track using main thread callback
         auto mtcm = main_thread_callback_manager::get();
-        mtcm->add_callback(fb2k::service_new<PreviewSkipCallback>());
+        mtcm->add_callback(fb2k::service_new<PlaybackCommandCallback>(
+            [] { playback_control::get()->next(); }));
     }
 }
-
-// Callback to skip to next track on main thread (for low rating skip)
-class LowRatingSkipCallback : public main_thread_callback {
-public:
-    void callback_run() override {
-        playback_control::get()->next();
-    }
-};
 
 bool PlaybackStateManager::check_and_skip_low_rating(metadb_handle_ptr p_track) {
     // Check if skip low rating is enabled
@@ -540,8 +575,7 @@ bool PlaybackStateManager::check_and_skip_low_rating(metadb_handle_ptr p_track) 
     try {
         // Compile once and cache the titleformat object
         if (!m_rating_format.is_valid()) {
-            static_api_ptr_t<titleformat_compiler> compiler;
-            compiler->compile(m_rating_format, "%rating%");
+            titleformat_compiler::get()->compile_safe(m_rating_format, "%rating%");
         }
         if (m_rating_format.is_valid()) {
             pfc::string8 rating_str;
@@ -557,7 +591,8 @@ bool PlaybackStateManager::check_and_skip_low_rating(metadb_handle_ptr p_track) 
 
                     // Skip to next track using main thread callback
                     auto mtcm = main_thread_callback_manager::get();
-                    mtcm->add_callback(fb2k::service_new<LowRatingSkipCallback>());
+                    mtcm->add_callback(fb2k::service_new<PlaybackCommandCallback>(
+                        [] { playback_control::get()->next(); }));
                     return true;
                 }
             }
