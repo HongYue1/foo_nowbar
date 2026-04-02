@@ -64,7 +64,7 @@ PlaybackStateManager::PlaybackStateManager()
 void PlaybackStateManager::register_callback(IPlaybackStateCallback* cb) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_callbacks.push_back(cb);
-    m_callbacks_snapshot = std::make_shared<std::vector<IPlaybackStateCallback*>>(m_callbacks);
+    m_callbacks_snapshot.store(std::make_shared<std::vector<IPlaybackStateCallback*>>(m_callbacks));
 }
 
 void PlaybackStateManager::unregister_callback(IPlaybackStateCallback* cb) {
@@ -73,7 +73,7 @@ void PlaybackStateManager::unregister_callback(IPlaybackStateCallback* cb) {
         std::remove(m_callbacks.begin(), m_callbacks.end(), cb),
         m_callbacks.end()
     );
-    m_callbacks_snapshot = std::make_shared<std::vector<IPlaybackStateCallback*>>(m_callbacks);
+    m_callbacks_snapshot.store(std::make_shared<std::vector<IPlaybackStateCallback*>>(m_callbacks));
 }
 
 void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_command, bool p_paused) noexcept {
@@ -274,7 +274,7 @@ void PlaybackStateManager::notify_state_changed() {
         std::lock_guard<std::mutex> lock(m_mutex);
         state_snapshot = m_state;
     }
-    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    auto snap = m_callbacks_snapshot.load();
     if (!snap) return;
     for (auto* cb : *snap) {
         cb->on_playback_state_changed(state_snapshot);
@@ -282,7 +282,7 @@ void PlaybackStateManager::notify_state_changed() {
 }
 
 void PlaybackStateManager::notify_time_changed(double time) {
-    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    auto snap = m_callbacks_snapshot.load();
     if (!snap) return;
     for (auto* cb : *snap) {
         cb->on_playback_time_changed(time);
@@ -290,7 +290,7 @@ void PlaybackStateManager::notify_time_changed(double time) {
 }
 
 void PlaybackStateManager::notify_volume_changed(float volume) {
-    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    auto snap = m_callbacks_snapshot.load();
     if (!snap) return;
     for (auto* cb : *snap) {
         cb->on_volume_changed(volume);
@@ -298,7 +298,7 @@ void PlaybackStateManager::notify_volume_changed(float volume) {
 }
 
 void PlaybackStateManager::notify_track_changed() {
-    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    auto snap = m_callbacks_snapshot.load();
     if (!snap) return;
     for (auto* cb : *snap) {
         cb->on_track_changed();

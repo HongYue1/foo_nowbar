@@ -81,7 +81,7 @@ private:
     std::vector<IPlaybackStateCallback*> m_callbacks;
     // Immutable snapshot rebuilt on every register/unregister — lets all four
     // notify_*() hot paths read without taking m_mutex.
-    std::shared_ptr<std::vector<IPlaybackStateCallback*>> m_callbacks_snapshot;
+    std::atomic<std::shared_ptr<std::vector<IPlaybackStateCallback*>>> m_callbacks_snapshot;
     mutable std::mutex m_mutex;
     std::mt19937 m_rng{std::random_device{}()};  // Properly seeded RNG for shuffle operations
     // Coalesces rapid on_playback_time decoder-thread callbacks: only one
