@@ -30,6 +30,40 @@ HBITMAP create_argb_dib_section(HDC hdc, int w, int h) {
     return CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &pvBits, nullptr, 0);
 }
 
+void ControlPanelCore::do_paint(HDC hdc, const RECT& rect, GdiCache& cache) {
+    // Recreate offscreen bitmap only when the window is resized
+    if (rect.right != cache.w || rect.bottom != cache.h || !cache.dc) {
+        cache.release();
+        cache.dc         = CreateCompatibleDC(hdc);
+        cache.bitmap     = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
+        cache.old_bitmap = static_cast<HBITMAP>(SelectObject(cache.dc, cache.bitmap));
+        cache.w          = rect.right;
+        cache.h          = rect.bottom;
+        force_full_repaint();
+    }
+
+    const bool spectrum_fast = is_spectrum_animating_only() &&
+                               get_nowbar_visualization_mode() == 1;
+    const bool waveform_fast = is_waveform_progress_only() &&
+                               get_nowbar_visualization_mode() == 2;
+
+    if (spectrum_fast) {
+        paint_spectrum_only(cache.dc, rect);
+    } else if (waveform_fast) {
+        clear_waveform_dirty_rects(cache.dc, get_bg_colorref());
+        paint_waveform_only(cache.dc, rect);
+    } else {
+        {
+            HBRUSH bgBrush = CreateSolidBrush(get_bg_colorref());
+            FillRect(cache.dc, &rect, bgBrush);
+            DeleteObject(bgBrush);
+        }
+        paint(cache.dc, rect);
+    }
+
+    BitBlt(hdc, 0, 0, rect.right, rect.bottom, cache.dc, 0, 0, SRCCOPY);
+}
+
 } // namespace nowbar
 
 // Resolve U+XXXX notation to actual UTF-8 character.

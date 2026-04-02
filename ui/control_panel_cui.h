@@ -41,12 +41,8 @@ private:
     std::unique_ptr<ControlPanelCore> m_core;
     bool m_tracking_mouse = false;
 
-    // Cached offscreen bitmap for double buffering (avoids alloc/free per frame)
-    HDC m_cache_dc = nullptr;
-    HBITMAP m_cache_bitmap = nullptr;
-    HBITMAP m_cache_old_bitmap = nullptr;
-    int m_cache_w = 0;
-    int m_cache_h = 0;
+    // Offscreen double-buffer cache (shared via GdiCache helper)
+    GdiCache m_gdi_cache;
     
     // CUI colour change callback for Custom theme mode
     class ColourCallback : public cui::colours::common_callback {
@@ -54,13 +50,13 @@ private:
         ColourCallback(ControlPanelCUI* owner) : m_owner(owner) {}
         ~ColourCallback() = default;
 
-        void on_colour_changed(uint32_t changed_items_mask) const override {
+        void on_colour_changed(uint32_t changed_items_mask) const noexcept override {
             if (m_owner && m_owner->m_core) {
                 m_owner->m_core->on_settings_changed();
             }
         }
         
-        void on_bool_changed(uint32_t /*changed_items_mask*/) const override {
+        void on_bool_changed(uint32_t /*changed_items_mask*/) const noexcept override {
             // Dark mode changes are handled by m_dark_notifier (cui::colours::dark_mode_notifier).
             // Calling on_settings_changed() here would double-fire it on every dark mode toggle
             // because the notifier and this callback both observe the same flag. No-op.

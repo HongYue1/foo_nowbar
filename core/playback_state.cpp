@@ -64,6 +64,7 @@ PlaybackStateManager::PlaybackStateManager()
 void PlaybackStateManager::register_callback(IPlaybackStateCallback* cb) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_callbacks.push_back(cb);
+    m_callbacks_snapshot = std::make_shared<std::vector<IPlaybackStateCallback*>>(m_callbacks);
 }
 
 void PlaybackStateManager::unregister_callback(IPlaybackStateCallback* cb) {
@@ -72,6 +73,7 @@ void PlaybackStateManager::unregister_callback(IPlaybackStateCallback* cb) {
         std::remove(m_callbacks.begin(), m_callbacks.end(), cb),
         m_callbacks.end()
     );
+    m_callbacks_snapshot = std::make_shared<std::vector<IPlaybackStateCallback*>>(m_callbacks);
 }
 
 void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_command, bool p_paused) noexcept {
@@ -129,11 +131,8 @@ void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason
     }
 
     // Handle infinite playback before clearing state.
-    // Deferred via fb2k::inMainThread: get_all_items() iterates the full library
-    // synchronously on the main thread.  Posting the lambda here (from the playback
-    // thread) ensures the callback returns first; the library scan runs on the next
-    // main-thread dispatch.  For very large libraries this may briefly stall the UI;
-    // a future optimisation can offload the scan with fb2k::splitTask.
+    // Deferred via fb2k::inMainThread so this callback returns first;
+    // the library scan and filtering run off-thread via fb2k::splitTask.
     if (p_reason == play_control::stop_reason_eof && get_nowbar_infinite_playback_enabled()) {
         fb2k::inMainThread([this] {
             if (is_available()) handle_infinite_playback();
@@ -173,12 +172,16 @@ void PlaybackStateManager::on_playback_pause(bool p_state) noexcept {
 }
 
 void PlaybackStateManager::on_playback_time(double p_time) noexcept {
-    // on_playback_time fires on the audio decoder thread.
-    // Marshal to the main thread to avoid data races with UI paint().
+    // on_playback_time fires on the audio decoder thread at ~20 Hz.
+    // Using exchange(true) ensures at most one lambda is queued at any moment:
+    // if one is already pending we skip enqueueing another, preventing the
+    // main-thread message queue from building up during transient slowdowns.
+    if (m_time_update_pending.exchange(true)) return;
     fb2k::inMainThread([p_time]() {
         if (!is_available()) return;
+        auto& mgr = get();
+        mgr.m_time_update_pending.store(false, std::memory_order_relaxed);
         try {
-            auto& mgr = get();
             mgr.m_state.playback_time = p_time;
             mgr.notify_time_changed(p_time);
             mgr.check_preview_skip(p_time);
@@ -266,47 +269,38 @@ void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
 }
 
 void PlaybackStateManager::notify_state_changed() {
-    std::vector<IPlaybackStateCallback*> callbacks;
     PlaybackState state_snapshot;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        callbacks = m_callbacks;
         state_snapshot = m_state;
     }
-    for (auto* cb : callbacks) {
+    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    if (!snap) return;
+    for (auto* cb : *snap) {
         cb->on_playback_state_changed(state_snapshot);
     }
 }
 
 void PlaybackStateManager::notify_time_changed(double time) {
-    std::vector<IPlaybackStateCallback*> callbacks;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        callbacks = m_callbacks;
-    }
-    for (auto* cb : callbacks) {
+    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    if (!snap) return;
+    for (auto* cb : *snap) {
         cb->on_playback_time_changed(time);
     }
 }
 
 void PlaybackStateManager::notify_volume_changed(float volume) {
-    std::vector<IPlaybackStateCallback*> callbacks;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        callbacks = m_callbacks;
-    }
-    for (auto* cb : callbacks) {
+    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    if (!snap) return;
+    for (auto* cb : *snap) {
         cb->on_volume_changed(volume);
     }
 }
 
 void PlaybackStateManager::notify_track_changed() {
-    std::vector<IPlaybackStateCallback*> callbacks;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        callbacks = m_callbacks;
-    }
-    for (auto* cb : callbacks) {
+    auto snap = std::atomic_load(&m_callbacks_snapshot);
+    if (!snap) return;
+    for (auto* cb : *snap) {
         cb->on_track_changed();
     }
 }
@@ -334,9 +328,6 @@ void PlaybackStateManager::handle_infinite_playback() {
     auto pc = playback_control::get();
 
     // Debounce: if infinite playback was triggered less than 10 seconds ago, skip.
-    // This prevents a feedback loop when the output device becomes unavailable
-    // (e.g. Bluetooth headset disconnected) — playback fails immediately after
-    // start(), triggering another EOF stop, which would re-trigger infinite playback.
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_infinite_playback_time).count();
     if (m_last_infinite_playback_time.time_since_epoch().count() != 0 && elapsed < 10) {
@@ -344,30 +335,23 @@ void PlaybackStateManager::handle_infinite_playback() {
     }
     m_last_infinite_playback_time = now;
 
-    // Don't add tracks if "stop after current" is enabled
     if (pc->get_stop_after_current()) return;
 
     t_size active_playlist = pm->get_active_playlist();
     if (active_playlist == pfc_infinite) return;
 
-    // Check if playlist is an autoplaylist - if so, don't interfere
     try {
         auto apm = autoplaylist_manager::get();
-        if (apm->is_client_present(active_playlist)) {
-            return;  // This is an autoplaylist, skip infinite playback
-        }
-    } catch (...) {
-        // autoplaylist_manager might not be available, continue
-    }
+        if (apm->is_client_present(active_playlist)) return;
+    } catch (...) {}
 
-    // Get the position where we'll insert new tracks
-    t_size playlist_count = pm->playlist_get_item_count(active_playlist);
-    t_size insert_position = playlist_count;
+    // ── Main-thread-only reads ────────────────────────────────────────────────
+    // library_manager::get_all_items(), playlist_get_item_handle() must stay here.
+    t_size playlist_count   = pm->playlist_get_item_count(active_playlist);
+    t_size insert_position  = playlist_count;
 
-    // Collect genres from the last few tracks in the playlist (up to 10)
     std::set<pfc::string8> genres;
     t_size scan_count = std::min(playlist_count, (t_size)10);
-
     for (t_size i = 0; i < scan_count; i++) {
         t_size idx = playlist_count - 1 - i;
         metadb_handle_ptr track;
@@ -375,121 +359,100 @@ void PlaybackStateManager::handle_infinite_playback() {
             metadb_info_container::ptr info = track->get_info_ref();
             if (info.is_valid()) {
                 const file_info& fi = info->info();
-                // Check multiple genre fields
                 for (t_size g = 0; g < fi.meta_get_count_by_name("genre"); g++) {
                     const char* genre = fi.meta_get("genre", g);
-                    if (genre && strlen(genre) > 0) {
+                    if (genre && strlen(genre) > 0)
                         genres.insert(pfc::string8(genre));
-                    }
                 }
             }
         }
     }
 
-    // Get all tracks from the library
-    auto library = library_manager::get();
-    pfc::list_t<metadb_handle_ptr> library_items;
-    library->get_all_items(library_items);
-
-    if (library_items.get_count() == 0) return;
-
-    // Collect current playlist tracks to avoid duplicates
     std::set<pfc::string8> playlist_paths;
     for (t_size i = 0; i < playlist_count; i++) {
         metadb_handle_ptr track;
-        if (pm->playlist_get_item_handle(track, active_playlist, i) && track.is_valid()) {
+        if (pm->playlist_get_item_handle(track, active_playlist, i) && track.is_valid())
             playlist_paths.insert(pfc::string8(track->get_path()));
-        }
     }
 
-    // Find matching tracks from library
-    pfc::list_t<metadb_handle_ptr> matching_tracks;
-    pfc::list_t<metadb_handle_ptr> fallback_tracks;
+    pfc::list_t<metadb_handle_ptr> library_items;
+    library_manager::get()->get_all_items(library_items);
+    if (library_items.get_count() == 0) return;
 
-    // Seed random with current time
-    // (Removed: was re-seeding srand() on every call, causing identical sequences.
-    //  Now uses m_rng (std::mt19937 seeded once at construction).)
+    // ── Worker task: O(n) filtering + shuffling off the main thread ───────────
+    fb2k::splitTask([
+        library_items  = std::move(library_items),
+        playlist_paths = std::move(playlist_paths),
+        genres         = std::move(genres),
+        active_playlist,
+        insert_position,
+        rng = m_rng   // snapshot RNG state; m_rng lives on main thread
+    ]() mutable {
+        pfc::list_t<metadb_handle_ptr> matching_tracks;
+        pfc::list_t<metadb_handle_ptr> fallback_tracks;
 
-    for (t_size i = 0; i < library_items.get_count(); i++) {
-        metadb_handle_ptr track = library_items[i];
-        if (!track.is_valid()) continue;
+        for (t_size i = 0; i < library_items.get_count(); i++) {
+            metadb_handle_ptr track = library_items[i];
+            if (!track.is_valid()) continue;
+            if (playlist_paths.count(pfc::string8(track->get_path())) > 0) continue;
 
-        // Skip if already in playlist
-        if (playlist_paths.count(pfc::string8(track->get_path())) > 0) continue;
+            metadb_info_container::ptr info = track->get_info_ref();
+            if (!info.is_valid()) continue;
+            const file_info& fi = info->info();
 
-        metadb_info_container::ptr info = track->get_info_ref();
-        if (!info.is_valid()) continue;
-
-        const file_info& fi = info->info();
-
-        // Check if track matches any of our collected genres
-        bool matches_genre = false;
-        if (!genres.empty()) {
-            for (t_size g = 0; g < fi.meta_get_count_by_name("genre"); g++) {
-                const char* genre = fi.meta_get("genre", g);
-                if (genre && genres.count(pfc::string8(genre)) > 0) {
-                    matches_genre = true;
-                    break;
+            bool matches_genre = false;
+            if (!genres.empty()) {
+                for (t_size g = 0; g < fi.meta_get_count_by_name("genre"); g++) {
+                    const char* genre = fi.meta_get("genre", g);
+                    if (genre && genres.count(pfc::string8(genre)) > 0) {
+                        matches_genre = true;
+                        break;
+                    }
                 }
             }
+            if (matches_genre) matching_tracks.add_item(track);
+            else               fallback_tracks.add_item(track);
         }
 
-        if (matches_genre) {
-            matching_tracks.add_item(track);
-        } else {
-            fallback_tracks.add_item(track);
-        }
-    }
-
-    // Select tracks to add (prefer matching, fall back to random)
-    pfc::list_t<metadb_handle_ptr> tracks_to_add;
-    const int tracks_to_select = 15;
-
-    // First, add from matching tracks (randomized)
-    if (matching_tracks.get_count() > 0) {
-        // Shuffle matching tracks using seeded mt19937
-        for (t_size i = matching_tracks.get_count() - 1; i > 0; i--) {
-            std::uniform_int_distribution<t_size> dist(0, i);
-            t_size j = dist(m_rng);
-            if (i != j) {
-                metadb_handle_ptr temp = matching_tracks[i];
-                matching_tracks.replace_item(i, matching_tracks[j]);
-                matching_tracks.replace_item(j, temp);
+        // Shuffle helper (Fisher-Yates)
+        auto shuffle = [&rng](pfc::list_t<metadb_handle_ptr>& list) mutable {
+            for (t_size i = list.get_count() - 1; i > 0; i--) {
+                std::uniform_int_distribution<t_size> dist(0, i);
+                t_size j = dist(rng);
+                if (i != j) {
+                    metadb_handle_ptr tmp = list[i];
+                    list.replace_item(i, list[j]);
+                    list.replace_item(j, tmp);
+                }
             }
+        };
+
+        pfc::list_t<metadb_handle_ptr> tracks_to_add;
+        const int tracks_to_select = 15;
+
+        if (matching_tracks.get_count() > 0) {
+            shuffle(matching_tracks);
+            for (t_size i = 0; i < matching_tracks.get_count() && tracks_to_add.get_count() < tracks_to_select; i++)
+                tracks_to_add.add_item(matching_tracks[i]);
+        }
+        if (tracks_to_add.get_count() < tracks_to_select && fallback_tracks.get_count() > 0) {
+            shuffle(fallback_tracks);
+            for (t_size i = 0; i < fallback_tracks.get_count() && tracks_to_add.get_count() < tracks_to_select; i++)
+                tracks_to_add.add_item(fallback_tracks[i]);
         }
 
-        for (t_size i = 0; i < matching_tracks.get_count() && tracks_to_add.get_count() < tracks_to_select; i++) {
-            tracks_to_add.add_item(matching_tracks[i]);
-        }
-    }
+        if (tracks_to_add.get_count() == 0) return;
 
-    // If we don't have enough, add from fallback (random tracks)
-    if (tracks_to_add.get_count() < tracks_to_select && fallback_tracks.get_count() > 0) {
-        // Shuffle fallback tracks using seeded mt19937
-        for (t_size i = fallback_tracks.get_count() - 1; i > 0; i--) {
-            std::uniform_int_distribution<t_size> dist(0, i);
-            t_size j = dist(m_rng);
-            if (i != j) {
-                metadb_handle_ptr temp = fallback_tracks[i];
-                fallback_tracks.replace_item(i, fallback_tracks[j]);
-                fallback_tracks.replace_item(j, temp);
-            }
-        }
-
-        for (t_size i = 0; i < fallback_tracks.get_count() && tracks_to_add.get_count() < tracks_to_select; i++) {
-            tracks_to_add.add_item(fallback_tracks[i]);
-        }
-    }
-
-    if (tracks_to_add.get_count() == 0) return;
-
-    // Add tracks to playlist
-    bit_array_false selection;
-    pm->playlist_insert_items(active_playlist, insert_position, tracks_to_add, selection);
-
-    // Start playback from the first new track using main thread callback
-    auto mtcm = main_thread_callback_manager::get();
-    mtcm->add_callback(fb2k::service_new<InfinitePlaybackCallback>(insert_position));
+        // ── Marshal back to main thread for playlist mutation ─────────────────
+        fb2k::inMainThread([tracks_to_add, active_playlist, insert_position]() mutable {
+            auto pm2 = playlist_manager::get();
+            if (active_playlist >= pm2->get_playlist_count()) return;
+            bit_array_false selection;
+            pm2->playlist_insert_items(active_playlist, insert_position, tracks_to_add, selection);
+            auto mtcm = main_thread_callback_manager::get();
+            mtcm->add_callback(fb2k::service_new<InfinitePlaybackCallback>(insert_position));
+        });
+    });
 }
 
 // Generic reusable callback that runs an arbitrary lambda on the main thread.

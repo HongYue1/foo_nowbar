@@ -82,10 +82,7 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
         m_colour_callback.reset();
         m_colour_manager.release();
         m_core.reset();
-        // Release cached offscreen bitmap
-        if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
-        if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
-        m_cache_w = m_cache_h = 0;
+        m_gdi_cache.release();
         return 0;
         
     case WM_SIZE: {
@@ -98,47 +95,9 @@ LRESULT ControlPanelCUI::on_message(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(wnd, &ps);
-
         RECT rect;
         GetClientRect(wnd, &rect);
-
-        // Recreate cached offscreen bitmap only when window size changes
-        if (rect.right != m_cache_w || rect.bottom != m_cache_h || !m_cache_dc) {
-            if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
-            if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
-            m_cache_dc = CreateCompatibleDC(hdc);
-            m_cache_bitmap = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
-            m_cache_old_bitmap = (HBITMAP)SelectObject(m_cache_dc, m_cache_bitmap);
-            m_cache_w = rect.right;
-            m_cache_h = rect.bottom;
-            if (m_core) m_core->force_full_repaint();
-        }
-
-        // Spectrum-only fast path: skip background/artwork/text/buttons redraw
-        bool spectrum_fast = m_core && m_core->is_spectrum_animating_only() &&
-                             get_nowbar_visualization_mode() == 1;
-        // Waveform-only fast path: skip background/artwork/text/buttons redraw
-        bool waveform_fast = m_core && m_core->is_waveform_progress_only() &&
-                             get_nowbar_visualization_mode() == 2;
-        if (spectrum_fast) {
-            // Background cache in paint_spectrum_only covers the dirty areas — no clear needed
-            m_core->paint_spectrum_only(m_cache_dc, rect);
-        } else if (waveform_fast) {
-            m_core->clear_waveform_dirty_rects(m_cache_dc, m_core->get_bg_colorref());
-            m_core->paint_waveform_only(m_cache_dc, rect);
-        } else {
-            {
-                HBRUSH bgBrush = CreateSolidBrush(m_core ? m_core->get_bg_colorref() : get_nowbar_initial_bg_color());
-                FillRect(m_cache_dc, &rect, bgBrush);
-                DeleteObject(bgBrush);
-            }
-            if (m_core) {
-                m_core->paint(m_cache_dc, rect);
-            }
-        }
-
-        BitBlt(hdc, 0, 0, rect.right, rect.bottom, m_cache_dc, 0, 0, SRCCOPY);
-
+        if (m_core) m_core->do_paint(hdc, rect, m_gdi_cache);
         EndPaint(wnd, &ps);
         return 0;
     }

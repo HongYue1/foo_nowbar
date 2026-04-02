@@ -33,7 +33,6 @@ private:
     LRESULT handle_message(UINT msg, WPARAM wp, LPARAM lp);
     
     void update_artwork();
-    void release_gdi_cache();  // Free offscreen DC and bitmap; safe to call multiple times.
 
     static const wchar_t* get_class_name();
     static bool register_class();
@@ -44,12 +43,12 @@ private:
     std::unique_ptr<ControlPanelCore> m_core;
     bool m_tracking_mouse = false;
 
-    // Cached offscreen bitmap for double buffering (avoids alloc/free per frame)
-    HDC m_cache_dc = nullptr;
-    HBITMAP m_cache_bitmap = nullptr;
-    HBITMAP m_cache_old_bitmap = nullptr;
-    int m_cache_w = 0;
-    int m_cache_h = 0;
+    // Cached get_min_max_info() result — invalidated on DPI change and settings change
+    mutable ui_element_min_max_info m_cached_min_max{};
+    mutable bool m_min_max_dirty = true;
+
+    // Offscreen double-buffer cache (shared via GdiCache helper)
+    GdiCache m_gdi_cache;
 };
 
 } // namespace nowbar

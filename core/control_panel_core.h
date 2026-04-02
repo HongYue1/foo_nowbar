@@ -8,6 +8,27 @@ namespace nowbar {
 
 HBITMAP create_argb_dib_section(HDC hdc, int w, int h);
 
+// GDI double-buffer cache shared by the CUI and DUI wrappers.
+// Keeps the offscreen DC/bitmap alive across frames; reallocated only on resize.
+struct GdiCache {
+    HDC     dc         = nullptr;
+    HBITMAP bitmap     = nullptr;
+    HBITMAP old_bitmap = nullptr;
+    int     w          = 0;
+    int     h          = 0;
+
+    void release() noexcept {
+        if (bitmap) {
+            SelectObject(dc, old_bitmap);
+            DeleteObject(bitmap);
+            bitmap     = nullptr;
+            old_bitmap = nullptr;
+        }
+        if (dc) { DeleteDC(dc); dc = nullptr; }
+        w = h = 0;
+    }
+};
+
 // Layout constants (will be scaled by DPI)
 struct LayoutMetrics {
     int panel_height = 80;
@@ -92,6 +113,11 @@ public:
     
     // Painting
     void paint(HDC hdc, const RECT& rect);
+
+    // Shared WM_PAINT helper used by both CUI and DUI wrappers.
+    // Manages the GdiCache, selects spectrum/waveform fast paths, and blits
+    // the offscreen bitmap to hdc.  Caller owns BeginPaint/EndPaint.
+    void do_paint(HDC hdc, const RECT& rect, GdiCache& cache);
     
     // Mouse interaction
     HitRegion hit_test(int x, int y) const;
@@ -473,7 +499,7 @@ private:
     abort_callback_impl m_waveform_abort;
     std::thread m_waveform_thread;
     pfc::string8 m_waveform_track_path;
-    bool m_waveform_valid = false;
+    std::atomic<bool> m_waveform_valid{false};
     bool m_waveform_is_stream = false;
 
     // Waveform reveal animation

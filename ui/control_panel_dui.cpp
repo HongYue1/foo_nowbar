@@ -44,20 +44,6 @@ ControlPanelDUI::ControlPanelDUI(ui_element_config::ptr config, ui_element_insta
 {
 }
 
-void ControlPanelDUI::release_gdi_cache() {
-    if (m_cache_bitmap) {
-        SelectObject(m_cache_dc, m_cache_old_bitmap);
-        DeleteObject(m_cache_bitmap);
-        m_cache_bitmap = nullptr;
-        m_cache_old_bitmap = nullptr;
-    }
-    if (m_cache_dc) {
-        DeleteDC(m_cache_dc);
-        m_cache_dc = nullptr;
-    }
-    m_cache_w = m_cache_h = 0;
-}
-
 ControlPanelDUI::~ControlPanelDUI() {
     if (m_hwnd) {
         // Zero GWLP_USERDATA first so WindowProc falls through to DefWindowProc
@@ -67,7 +53,7 @@ ControlPanelDUI::~ControlPanelDUI() {
         m_hwnd = nullptr;
     }
     // WM_DESTROY is bypassed (self == null by then), so clean up GDI objects here.
-    release_gdi_cache();
+    m_gdi_cache.release();
 }
 
 void ControlPanelDUI::initialize_window(HWND parent) {
@@ -88,6 +74,7 @@ void ControlPanelDUI::initialize_window(HWND parent) {
 
 void ControlPanelDUI::set_configuration(ui_element_config::ptr data) {
     m_config = data;
+    m_min_max_dirty = true;
     // Notify the core that settings may have changed, and tell the host to
     // re-query min/max info (button visibility affects minimum width).
     if (m_core) m_core->on_settings_changed();
@@ -99,6 +86,8 @@ ui_element_config::ptr ControlPanelDUI::get_configuration() {
 }
 
 ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
+    if (!m_min_max_dirty) return m_cached_min_max;
+
     ui_element_min_max_info info;
     
     // GetDpiForWindow is a single cheap call (Windows 10+); fall back to 96 if the
@@ -130,6 +119,8 @@ ui_element_min_max_info ControlPanelDUI::get_min_max_info() {
     }
     info.m_min_width = static_cast<t_uint32>(base_width * dpi / 96.0);
     
+    m_cached_min_max = info;
+    m_min_max_dirty = false;
     return info;
 }
 
@@ -171,6 +162,7 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         // Signal the DUI host to re-query min/max info whenever settings change
         // (e.g. button visibility toggles affect minimum panel width).
         m_core->set_relayout_callback([this]() {
+            m_min_max_dirty = true;
             if (m_callback.is_valid()) m_callback->on_min_max_info_change();
         });
         
@@ -196,7 +188,7 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
         
     case WM_DESTROY:
         m_core.reset();
-        release_gdi_cache();
+        m_gdi_cache.release();
         return 0;
         
     case WM_SIZE: {
@@ -209,47 +201,9 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(m_hwnd, &ps);
-
         RECT rect;
         GetClientRect(m_hwnd, &rect);
-
-        // Recreate cached offscreen bitmap only when window size changes
-        if (rect.right != m_cache_w || rect.bottom != m_cache_h || !m_cache_dc) {
-            if (m_cache_bitmap) { SelectObject(m_cache_dc, m_cache_old_bitmap); DeleteObject(m_cache_bitmap); m_cache_bitmap = nullptr; }
-            if (m_cache_dc) { DeleteDC(m_cache_dc); m_cache_dc = nullptr; }
-            m_cache_dc = CreateCompatibleDC(hdc);
-            m_cache_bitmap = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
-            m_cache_old_bitmap = (HBITMAP)SelectObject(m_cache_dc, m_cache_bitmap);
-            m_cache_w = rect.right;
-            m_cache_h = rect.bottom;
-            if (m_core) m_core->force_full_repaint();
-        }
-
-        // Spectrum-only fast path: skip background/artwork/text/buttons redraw
-        bool spectrum_fast = m_core && m_core->is_spectrum_animating_only() &&
-                             get_nowbar_visualization_mode() == 1;
-        // Waveform-only fast path: skip background/artwork/text/buttons redraw
-        bool waveform_fast = m_core && m_core->is_waveform_progress_only() &&
-                             get_nowbar_visualization_mode() == 2;
-        if (spectrum_fast) {
-            // Background cache in paint_spectrum_only covers the dirty areas — no clear needed
-            m_core->paint_spectrum_only(m_cache_dc, rect);
-        } else if (waveform_fast) {
-            m_core->clear_waveform_dirty_rects(m_cache_dc, m_core->get_bg_colorref());
-            m_core->paint_waveform_only(m_cache_dc, rect);
-        } else {
-            {
-                HBRUSH bgBrush = CreateSolidBrush(m_core ? m_core->get_bg_colorref() : get_nowbar_initial_bg_color());
-                FillRect(m_cache_dc, &rect, bgBrush);
-                DeleteObject(bgBrush);
-            }
-            if (m_core) {
-                m_core->paint(m_cache_dc, rect);
-            }
-        }
-
-        BitBlt(hdc, 0, 0, rect.right, rect.bottom, m_cache_dc, 0, 0, SRCCOPY);
-
+        if (m_core) m_core->do_paint(hdc, rect, m_gdi_cache);
         EndPaint(m_hwnd, &ps);
         return 0;
     }
@@ -316,6 +270,7 @@ LRESULT ControlPanelDUI::handle_message(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DPICHANGED: {
         int new_dpi = HIWORD(wp);
         if (m_core) m_core->update_dpi(static_cast<float>(new_dpi) / 96.0f);
+        m_min_max_dirty = true;
         InvalidateRect(m_hwnd, nullptr, FALSE);
         return 0;
     }

@@ -79,8 +79,15 @@ private:
     titleformat_object::ptr m_rating_format; // Cached compiled "%rating%" titleformat
     std::chrono::steady_clock::time_point m_last_infinite_playback_time;  // Debounce for infinite playback
     std::vector<IPlaybackStateCallback*> m_callbacks;
+    // Immutable snapshot rebuilt on every register/unregister — lets all four
+    // notify_*() hot paths read without taking m_mutex.
+    std::shared_ptr<std::vector<IPlaybackStateCallback*>> m_callbacks_snapshot;
     mutable std::mutex m_mutex;
     std::mt19937 m_rng{std::random_device{}()};  // Properly seeded RNG for shuffle operations
+    // Coalesces rapid on_playback_time decoder-thread callbacks: only one
+    // inMainThread lambda is queued at a time so the message loop is never
+    // flooded during heavy decoding or a slow main thread.
+    std::atomic<bool> m_time_update_pending{false};
 
     bool check_and_skip_low_rating(metadb_handle_ptr p_track);  // Check rating and skip if needed
 };
