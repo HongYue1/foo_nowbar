@@ -180,14 +180,17 @@ void PlaybackStateManager::on_playback_time(double p_time) noexcept {
     m_latest_playback_time.store(p_time, std::memory_order_relaxed);
     if (m_time_update_pending.exchange(true)) return;
     fb2k::inMainThread([]() {
-        if (!is_available()) return;
-        auto& mgr = get();
-        mgr.m_time_update_pending.store(false, std::memory_order_relaxed);
-        double t = mgr.m_latest_playback_time.load(std::memory_order_relaxed);
+        // Read g_instance exactly once on the main thread.  shutdown() also runs
+        // on the main thread, so a single load here is an atomic snapshot —
+        // no second read can observe a different value within this dispatch.
+        PlaybackStateManager* mgr = g_instance;
+        if (!mgr) return;
+        mgr->m_time_update_pending.store(false, std::memory_order_relaxed);
+        double t = mgr->m_latest_playback_time.load(std::memory_order_relaxed);
         try {
-            mgr.m_state.playback_time = t;
-            mgr.notify_time_changed(t);
-            mgr.check_preview_skip(t);
+            mgr->m_state.playback_time = t;
+            mgr->notify_time_changed(t);
+            mgr->check_preview_skip(t);
         } catch (...) {}
     });
 }

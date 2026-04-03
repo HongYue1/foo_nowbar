@@ -7528,11 +7528,19 @@ void ControlPanelCore::request_animation(const RECT* dirty) {
     if (delay_ms < 1) delay_ms = 1;
     if (delay_ms > max_delay) delay_ms = max_delay;
 
-    CreateTimerQueueTimer(&m_anim_tp_timer, nullptr,
-        anim_tp_callback, reinterpret_cast<PVOID>(m_hwnd),
-        delay_ms, 0, WT_EXECUTEINTIMERTHREAD);
-    m_animation_timer_active = true;
-    m_animation_requested = true;
+    // CreateTimerQueueTimer can fail (returns FALSE); if it does, leave
+    // m_animation_timer_active = false so a later call doesn't attempt to
+    // DeleteTimerQueueTimer a null handle (which crashes).
+    if (CreateTimerQueueTimer(&m_anim_tp_timer, nullptr,
+            anim_tp_callback, reinterpret_cast<PVOID>(m_hwnd),
+            delay_ms, 0, WT_EXECUTEINTIMERTHREAD)) {
+        m_animation_timer_active = true;
+        m_animation_requested = true;
+    } else {
+        m_anim_tp_timer = nullptr;
+        // Fallback: invalidate immediately so the animation doesn't freeze.
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
   }
 }
 
@@ -8894,7 +8902,10 @@ void ControlPanelCore::start_waveform_computation() {
                   }
                 }
                 m_waveform_decode_count.store(seg, std::memory_order_relaxed);
-                ::InvalidateRect(hwnd, nullptr, FALSE);
+                // PostMessage is safe from any thread; InvalidateRect on a window
+                // not owned by this thread is not.  The WM_NOWBAR_ANIMATE handler
+                // on the main thread calls InvalidateRect + UpdateWindow correctly.
+                ::PostMessage(hwnd, ControlPanelCore::WM_NOWBAR_ANIMATE, 0, 0);
               }
             }
           }
@@ -8941,9 +8952,12 @@ void ControlPanelCore::start_waveform_computation() {
       // All segments decoded — main thread will pick up via decode_count
       m_waveform_decode_count.store(WAVEFORM_SEGMENTS, std::memory_order_relaxed);
 
-      // Trigger repaint on main thread via InvalidateRect (safe cross-thread).
+      // Trigger repaint on main thread.  PostMessage is the correct cross-thread
+      // mechanism; calling InvalidateRect directly on a window owned by another
+      // thread is not safe per MSDN.  WM_NOWBAR_ANIMATE handler calls
+      // InvalidateRect + UpdateWindow on the main thread.
       if (hwnd && ::IsWindow(hwnd)) {
-        ::InvalidateRect(hwnd, nullptr, FALSE);
+        ::PostMessage(hwnd, ControlPanelCore::WM_NOWBAR_ANIMATE, 0, 0);
       }
     } catch (...) {
       m_waveform_computing = false;

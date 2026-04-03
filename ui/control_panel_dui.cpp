@@ -11,27 +11,32 @@ const wchar_t* ControlPanelDUI::get_class_name() {
 }
 
 bool ControlPanelDUI::register_class() {
-    static bool registered = false;
-    if (registered) return true;
-    
-    // hbrBackground is stored in the WNDCLASSEXW and must outlive the class registration.
-    // We allocate it once here and let it live for the process lifetime (leaked intentionally
-    // at process exit, identical to what the OS would do). Using a solid brush here prevents
-    // a white flash before the first WM_PAINT; WM_ERASEBKGND returns 1 so the OS never
-    // actually paints with this brush during normal operation.
-    static HBRUSH s_bg_brush = CreateSolidBrush(RGB(24, 24, 24));
+    static std::once_flag s_flag;
+    static bool s_registered = false;
+    std::call_once(s_flag, [] {
+        // hbrBackground is stored in the WNDCLASSEXW and must outlive the class
+        // registration.  Allocated once here, lives for the process lifetime
+        // (intentionally leaked at exit — the OS reclaims it).  Using a solid
+        // brush prevents a white flash before the first WM_PAINT; WM_ERASEBKGND
+        // returns 1 so the OS never actually paints with it during normal operation.
+        static HBRUSH s_bg_brush = CreateSolidBrush(RGB(24, 24, 24));
 
-    WNDCLASSEXW wc = {};
-    wc.cbSize = sizeof(wc);
-    wc.style = CS_DBLCLKS;
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = core_api::get_my_instance();
-    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = s_bg_brush;
-    wc.lpszClassName = get_class_name();
-    
-    registered = (RegisterClassExW(&wc) != 0);
-    return registered;
+        WNDCLASSEXW wc = {};
+        wc.cbSize        = sizeof(wc);
+        wc.style         = CS_DBLCLKS;
+        wc.lpfnWndProc   = WindowProc;
+        wc.hInstance     = core_api::get_my_instance();
+        wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = s_bg_brush;
+        wc.lpszClassName = get_class_name();
+
+        s_registered = (RegisterClassExW(&wc) != 0);
+        if (!s_registered) {
+            FB2K_console_formatter() << "foo_nowbar: DUI window class registration failed "
+                                        "(error " << GetLastError() << ")";
+        }
+    });
+    return s_registered;
 }
 
 ui_element_config::ptr ControlPanelDUI::g_get_default_configuration() {

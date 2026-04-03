@@ -28,9 +28,9 @@ public:
     virtual void unregister_listener(nowbar_color_listener* listener) = 0;
 };
 
-// {A7E3B4C1-8F2D-4A6E-B5C9-1D3F7E8A2B4C}
-FOOGUIDDECL const GUID nowbar_color_provider::class_guid =
-    { 0xa7e3b4c1, 0x8f2d, 0x4a6e, { 0xb5, 0xc9, 0x1d, 0x3f, 0x7e, 0x8a, 0x2b, 0x4c } };
+// Authoritative GUID definition lives in nowbar_color_service_impl.cpp.
+// Defining it here would produce a duplicate-symbol error (ODR violation)
+// because this header is included by more than one translation unit.
 
 // Called by ControlPanelCore when colors change
 void nowbar_notify_color_changed();

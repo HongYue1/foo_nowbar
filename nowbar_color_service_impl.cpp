@@ -5,6 +5,12 @@
 #include <vector>
 #include <mutex>
 
+// Single authoritative definition of the service GUID.
+// Must not appear in the header because this header is included by multiple TUs.
+// {A7E3B4C1-8F2D-4A6E-B5C9-1D3F7E8A2B4C}
+FOOGUIDDECL const GUID nowbar_color_provider::class_guid =
+    { 0xa7e3b4c1, 0x8f2d, 0x4a6e, { 0xb5, 0xc9, 0x1d, 0x3f, 0x7e, 0x8a, 0x2b, 0x4c } };
+
 namespace {
 
 class nowbar_color_provider_impl : public nowbar_color_provider {
@@ -83,9 +89,17 @@ public:
         // Lock released before inMainThread2 — if it executes synchronously
         // (already on main thread), the lambda can safely acquire the mutex.
         fb2k::inMainThread2([]{
-            std::lock_guard<std::mutex> lock(s_listener_mutex);
-            s_pending_notify = false;
-            for (auto* listener : s_listeners) {
+            // Take a snapshot of the listener list under the lock, then release
+            // before dispatching.  This prevents a deadlock if any listener's
+            // on_color_changed() calls register_listener() or unregister_listener()
+            // (both of which acquire s_listener_mutex; std::mutex is non-recursive).
+            std::vector<nowbar_color_listener*> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(s_listener_mutex);
+                s_pending_notify = false;
+                snapshot = s_listeners;
+            }
+            for (auto* listener : snapshot) {
                 listener->on_color_changed();
             }
         });

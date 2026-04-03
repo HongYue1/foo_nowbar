@@ -25,6 +25,11 @@ static void artwork_result_callback(bool success, HBITMAP bitmap) {
     if (success && bitmap) {
         {
             std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
+            // Discard any unconsumed bitmap from a previous search before
+            // storing the new one; ownership was transferred to us on arrival.
+            if (g_pending_artwork_bitmap) {
+                DeleteObject(g_pending_artwork_bitmap);
+            }
             g_pending_artwork_bitmap = bitmap;
             g_has_pending_artwork = true;
         }
@@ -79,7 +84,11 @@ void shutdown_artwork_bridge() {
     }
     {
         std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
-        g_pending_artwork_bitmap = nullptr;
+        // We own this bitmap; free it before nulling the pointer.
+        if (g_pending_artwork_bitmap) {
+            DeleteObject(g_pending_artwork_bitmap);
+            g_pending_artwork_bitmap = nullptr;
+        }
         g_has_pending_artwork = false;
     }
     // Null every function pointer so is_artwork_bridge_available() returns false
@@ -104,10 +113,14 @@ void request_online_artwork(const char* artist, const char* title) {
         return;
     }
 
-    // Clear any pending artwork from previous search
+    // Clear any pending artwork from previous search, freeing the GDI handle
+    // we own before overwriting the pointer.
     {
         std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
-        g_pending_artwork_bitmap = nullptr;
+        if (g_pending_artwork_bitmap) {
+            DeleteObject(g_pending_artwork_bitmap);
+            g_pending_artwork_bitmap = nullptr;
+        }
         g_has_pending_artwork = false;
     }
 
