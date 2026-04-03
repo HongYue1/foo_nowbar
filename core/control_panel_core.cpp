@@ -36,6 +36,11 @@ void ControlPanelCore::do_paint(HDC hdc, const RECT& rect, GdiCache& cache) {
         cache.release();
         cache.dc         = CreateCompatibleDC(hdc);
         cache.bitmap     = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
+        if (!cache.dc || !cache.bitmap) {
+            // GDI resource exhaustion — release partial allocation and skip frame.
+            cache.release();
+            return;
+        }
         cache.old_bitmap = static_cast<HBITMAP>(SelectObject(cache.dc, cache.bitmap));
         cache.w          = rect.right;
         cache.h          = rect.bottom;
@@ -146,9 +151,16 @@ ControlPanelCore* ControlPanelCore::get_first_instance() {
 
 void ControlPanelCore::notify_theme_changed() {
   if (g_shutdown) return;
-  std::lock_guard<std::mutex> lock(g_instances_mutex);
-  // Call on_settings_changed() which properly respects theme mode preferences
-  for (auto *instance : g_instances) {
+  // Snapshot under lock, then release before calling on_settings_changed().
+  // on_settings_changed() can call cancel_waveform_computation() which joins
+  // a decoding thread — holding the mutex across that join would stall any
+  // concurrent register_instance / unregister_instance call for the duration.
+  std::vector<ControlPanelCore*> snapshot;
+  {
+    std::lock_guard<std::mutex> lock(g_instances_mutex);
+    snapshot = g_instances;
+  }
+  for (auto *instance : snapshot) {
     instance->on_settings_changed();
   }
 }
@@ -227,14 +239,18 @@ public:
             playlist_callback::flag_on_playlist_activate)
       , m_owner(owner) {}
 
-  void on_item_focus_change(t_size, t_size, t_size) override {
-    m_owner->update_rating_state();
-    m_owner->invalidate();
+  void on_item_focus_change(t_size, t_size, t_size) noexcept override {
+    try {
+      m_owner->update_rating_state();
+      m_owner->invalidate();
+    } catch (...) {}
   }
 
-  void on_playlist_activate(t_size, t_size) override {
-    m_owner->update_rating_state();
-    m_owner->invalidate();
+  void on_playlist_activate(t_size, t_size) noexcept override {
+    try {
+      m_owner->update_rating_state();
+      m_owner->invalidate();
+    } catch (...) {}
   }
 
 private:
@@ -247,17 +263,19 @@ class ControlPanelCore::MetadbChangeCallback : public metadb_io_callback_dynamic
 public:
   MetadbChangeCallback(ControlPanelCore* owner) : m_owner(owner) {}
 
-  void on_changed_sorted(metadb_handle_list_cref p_items_sorted, bool p_fromhook) override {
-    // Check if the currently displayed track is among the changed items
-    metadb_handle_ptr track = m_owner->get_rating_track();
-    if (!track.is_valid()) return;
+  void on_changed_sorted(metadb_handle_list_cref p_items_sorted, bool p_fromhook) noexcept override {
+    try {
+      // Check if the currently displayed track is among the changed items
+      metadb_handle_ptr track = m_owner->get_rating_track();
+      if (!track.is_valid()) return;
 
-    if (t_size index{}; p_items_sorted.bsearch_t(
-            pfc::compare_t<metadb_handle_ptr, metadb_handle_ptr>, track, index)) {
-      m_owner->update_rating_state();
-      m_owner->update_mood_state();
-      m_owner->invalidate();
-    }
+      if (t_size index{}; p_items_sorted.bsearch_t(
+              pfc::compare_t<metadb_handle_ptr, metadb_handle_ptr>, track, index)) {
+        m_owner->update_rating_state();
+        m_owner->update_mood_state();
+        m_owner->invalidate();
+      }
+    } catch (...) {}
   }
 
 private:
@@ -539,15 +557,23 @@ void ControlPanelCore::set_miniplayer_active(bool active) {
 }
 
 void ControlPanelCore::notify_all_settings_changed() {
-  std::lock_guard<std::mutex> lock(g_instances_mutex);
-  for (auto *instance : g_instances) {
+  std::vector<ControlPanelCore*> snapshot;
+  {
+    std::lock_guard<std::mutex> lock(g_instances_mutex);
+    snapshot = g_instances;
+  }
+  for (auto *instance : snapshot) {
     instance->on_settings_changed();
   }
 }
 
 void ControlPanelCore::notify_online_artwork_received() {
-  std::lock_guard<std::mutex> lock(g_instances_mutex);
-  for (auto *instance : g_instances) {
+  std::vector<ControlPanelCore*> snapshot;
+  {
+    std::lock_guard<std::mutex> lock(g_instances_mutex);
+    snapshot = g_instances;
+  }
+  for (auto *instance : snapshot) {
     instance->on_online_artwork_received();
   }
 }
@@ -773,6 +799,12 @@ void ControlPanelCore::apply_custom_colors() {
 }
 
 void ControlPanelCore::update_fonts() {
+  // initialize() has not been called yet — m_hwnd is null.
+  // initialize() calls on_settings_changed() which calls us, so fonts will
+  // be created correctly once the window exists.  Calling GetDC(nullptr)
+  // here would return the screen DC and produce wrong per-monitor DPI sizes.
+  if (!m_hwnd) return;
+
   // Get font settings from preferences
   LOGFONT lf_track = get_nowbar_use_custom_fonts()
                          ? get_nowbar_track_font()
@@ -7219,8 +7251,12 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
     return;
   }
 
-  // Create GDI+ bitmap from data
-  IStream *stream = nullptr;
+  // Create GDI+ bitmap from data.
+  // GlobalAlloc ownership rules:
+  //   - If GlobalLock fails we own hMem and must free it.
+  //   - If CreateStreamOnHGlobal(hMem, TRUE, ...) succeeds the stream owns
+  //     hMem (fDeleteOnRelease=TRUE) and we must NOT free it separately.
+  //   - If CreateStreamOnHGlobal fails we still own hMem and must free it.
   HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, data->get_size());
   if (hMem) {
     void *pMem = GlobalLock(hMem);
@@ -7228,7 +7264,9 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
       memcpy(pMem, data->get_ptr(), data->get_size());
       GlobalUnlock(hMem);
 
+      IStream *stream = nullptr;
       if (SUCCEEDED(CreateStreamOnHGlobal(hMem, TRUE, &stream))) {
+        // stream now owns hMem; do not free it ourselves.
         m_artwork_bitmap.reset(Gdiplus::Bitmap::FromStream(stream));
         stream->Release();
 
@@ -7254,7 +7292,13 @@ void ControlPanelCore::set_artwork(album_art_data_ptr data) {
         m_target_background.reset(); // Invalidate target for new artwork
         m_blurred_artwork_size = {0, 0};
         m_bg_cache_valid = false;  // Invalidate cache for new artwork
+      } else {
+        // CreateStreamOnHGlobal failed; we retain ownership of hMem.
+        GlobalFree(hMem);
       }
+    } else {
+      // GlobalLock failed; we retain ownership of hMem.
+      GlobalFree(hMem);
     }
   }
 
@@ -7269,8 +7313,11 @@ void ControlPanelCore::set_artwork_from_hbitmap(HBITMAP bitmap) {
     return;
   }
 
-  // Create GDI+ bitmap from HBITMAP
+  // Create GDI+ bitmap from HBITMAP.
+  // FromHBITMAP copies the pixel data into the new Bitmap object; the original
+  // HBITMAP is not retained by GDI+ and must be released by the caller.
   m_artwork_bitmap.reset(Gdiplus::Bitmap::FromHBITMAP(bitmap, nullptr));
+  DeleteObject(bitmap);  // release original — GDI+ owns its own copy now
 
   if (m_artwork_bitmap && m_artwork_bitmap->GetLastStatus() == Gdiplus::Ok) {
     // Create thumbnail first (downscales full-res and releases it),
@@ -8971,6 +9018,29 @@ void ControlPanelCore::load_waveform_cache() {
 }
 
 void ControlPanelCore::save_waveform_entry(const char* path, const std::vector<float>& peaks) {
+  // The caller updates m_waveform_cache immediately before calling us.
+  // If the path was already present before this decode run (i.e., we found it
+  // in the file during load_waveform_cache), the in-memory map already held
+  // it — we should not append a duplicate record to the file.
+  // We detect this by checking whether the key existed BEFORE the caller
+  // inserted it: at this point the map contains the new entry, so we check
+  // whether the on-disk count is about to get one more entry that matches
+  // an existing key.  The simplest correct heuristic is: if the cache was
+  // loaded from disk and already contained this path, skip the write.
+  {
+    std::lock_guard<std::mutex> lock(m_waveform_mutex);
+    // m_waveform_cache_loaded == true means load_waveform_cache() has run and
+    // any pre-existing entry for this path was already in the map before the
+    // current decode started.  The current decode stores its own new entry, so
+    // if the map had it before, we have a duplicate — don't append again.
+    if (m_waveform_cache_loaded &&
+        m_waveform_cache.count(std::string(path)) > 0 &&
+        m_waveform_cache.at(std::string(path)).size() == peaks.size()) {
+      // Already persisted from a previous session; skip the write.
+      return;
+    }
+  }
+
   ensure_config_dir_exists();
 
   pfc::string8 cache_path = get_wavecache_path();

@@ -77,9 +77,20 @@ void shutdown_artwork_bridge() {
     } else if (g_artwork_set_callback) {
         g_artwork_set_callback(nullptr); // Fallback for older foo_artwork
     }
-    std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
-    g_pending_artwork_bitmap = nullptr;
-    g_has_pending_artwork = false;
+    {
+        std::lock_guard<std::mutex> lock(g_pending_artwork_mutex);
+        g_pending_artwork_bitmap = nullptr;
+        g_has_pending_artwork = false;
+    }
+    // Null every function pointer so is_artwork_bridge_available() returns false
+    // and any queued inMainThread lambda that slipped past the shutdown window
+    // cannot dereference a pointer into a potentially-unregistered module.
+    g_artwork_search          = nullptr;
+    g_artwork_get_bitmap      = nullptr;
+    g_artwork_is_loading      = nullptr;
+    g_artwork_set_callback    = nullptr;
+    g_artwork_remove_callback = nullptr;
+    g_foo_artwork_module      = nullptr;
 }
 
 void request_online_artwork(const char* artist, const char* title) {

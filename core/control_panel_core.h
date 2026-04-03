@@ -18,11 +18,15 @@ struct GdiCache {
     int     h          = 0;
 
     void release() noexcept {
-        if (bitmap) {
+        if (dc && bitmap) {
             SelectObject(dc, old_bitmap);
             DeleteObject(bitmap);
             bitmap     = nullptr;
             old_bitmap = nullptr;
+        } else if (bitmap) {
+            // dc creation failed but bitmap was allocated; free it directly.
+            DeleteObject(bitmap);
+            bitmap = nullptr;
         }
         if (dc) { DeleteDC(dc); dc = nullptr; }
         w = h = 0;

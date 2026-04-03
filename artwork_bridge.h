@@ -40,5 +40,8 @@ void request_online_artwork(const char* artist, const char* title);
 // Check if artwork was received from foo_artwork
 bool has_pending_online_artwork();
 
-// Get and clear the pending artwork bitmap (caller must NOT delete the HBITMAP)
+// Get and clear the pending artwork bitmap.
+// Ownership is transferred to the caller, which is responsible for calling
+// DeleteObject() on the returned handle when it is no longer needed.
+// Returns nullptr if no artwork is pending.
 HBITMAP get_pending_online_artwork();

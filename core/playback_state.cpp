@@ -173,18 +173,21 @@ void PlaybackStateManager::on_playback_pause(bool p_state) noexcept {
 
 void PlaybackStateManager::on_playback_time(double p_time) noexcept {
     // on_playback_time fires on the audio decoder thread at ~20 Hz.
-    // Using exchange(true) ensures at most one lambda is queued at any moment:
-    // if one is already pending we skip enqueueing another, preventing the
-    // main-thread message queue from building up during transient slowdowns.
+    // Always store the latest position first.  The coalescing guard below
+    // ensures at most one lambda is queued at any moment; the lambda reads
+    // back m_latest_playback_time so it always dispatches the newest value
+    // rather than the (potentially stale) value captured at enqueue time.
+    m_latest_playback_time.store(p_time, std::memory_order_relaxed);
     if (m_time_update_pending.exchange(true)) return;
-    fb2k::inMainThread([p_time]() {
+    fb2k::inMainThread([]() {
         if (!is_available()) return;
         auto& mgr = get();
         mgr.m_time_update_pending.store(false, std::memory_order_relaxed);
+        double t = mgr.m_latest_playback_time.load(std::memory_order_relaxed);
         try {
-            mgr.m_state.playback_time = p_time;
-            mgr.notify_time_changed(p_time);
-            mgr.check_preview_skip(p_time);
+            mgr.m_state.playback_time = t;
+            mgr.notify_time_changed(t);
+            mgr.check_preview_skip(t);
         } catch (...) {}
     });
 }

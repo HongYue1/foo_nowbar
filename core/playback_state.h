@@ -87,7 +87,11 @@ private:
     // Coalesces rapid on_playback_time decoder-thread callbacks: only one
     // inMainThread lambda is queued at a time so the message loop is never
     // flooded during heavy decoding or a slow main thread.
-    std::atomic<bool> m_time_update_pending{false};
+    // m_latest_playback_time holds the most-recently delivered position so
+    // the one queued lambda always dispatches the newest value, not the value
+    // that was current when the lambda was first enqueued.
+    std::atomic<bool>   m_time_update_pending{false};
+    std::atomic<double> m_latest_playback_time{0.0};
 
     bool check_and_skip_low_rating(metadb_handle_ptr p_track);  // Check rating and skip if needed
 };
