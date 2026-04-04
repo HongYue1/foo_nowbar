@@ -3,8 +3,17 @@
 #include "playback_state.h"
 #include "../preferences.h"
 #include <unordered_map>
+#include <mutex>
+#include <vector>
 
 namespace nowbar {
+
+// Forward-declared so nowbar_color_service_impl.cpp can lock the registry
+// while reading colour values from ControlPanelCore, preventing a TOCTOU
+// race where the pointer is loaded then the object is destroyed before use.
+// Defined in control_panel_core.cpp.
+extern std::vector<class ControlPanelCore*> g_instances;
+extern std::mutex                           g_instances_mutex;
 
 HBITMAP create_argb_dib_section(HDC hdc, int w, int h);
 

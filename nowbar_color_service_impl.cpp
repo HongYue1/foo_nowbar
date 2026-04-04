@@ -16,7 +16,13 @@ namespace {
 class nowbar_color_provider_impl : public nowbar_color_provider {
 public:
     void get_resolved_bg_color(uint8_t& r, uint8_t& g, uint8_t& b) override {
-        auto* core = get_first_instance();
+        // Read all values under g_instances_mutex so the ControlPanelCore*
+        // cannot be destroyed between the pointer load and the field reads.
+        // ControlPanelCore::unregister_instance() also takes g_instances_mutex
+        // before the object is torn down, guaranteeing the pointer remains
+        // valid for the duration of this lock scope.
+        std::lock_guard<std::mutex> lk(nowbar::g_instances_mutex);
+        auto* core = nowbar::g_instances.empty() ? nullptr : nowbar::g_instances.front();
         if (!core) {
             r = 24; g = 24; b = 24;
             return;
@@ -31,12 +37,10 @@ public:
             BYTE ov = (bg_style == 1) ? (core->get_dark_mode() ? 120 : 80)
                                        : (core->get_dark_mode() ? 140 : 180);
             if (core->get_dark_mode()) {
-                // Dark mode: blend artwork color toward black
                 r = static_cast<uint8_t>(pr * (255 - ov) / 255);
                 g = static_cast<uint8_t>(pg * (255 - ov) / 255);
                 b = static_cast<uint8_t>(pb * (255 - ov) / 255);
             } else {
-                // Light mode: blend artwork color toward white
                 r = static_cast<uint8_t>(pr + (255 - pr) * ov / 255);
                 g = static_cast<uint8_t>(pg + (255 - pg) * ov / 255);
                 b = static_cast<uint8_t>(pb + (255 - pb) * ov / 255);
@@ -50,7 +54,8 @@ public:
     }
 
     void get_artwork_primary_color(uint8_t& r, uint8_t& g, uint8_t& b, bool& valid) override {
-        auto* core = get_first_instance();
+        std::lock_guard<std::mutex> lk(nowbar::g_instances_mutex);
+        auto* core = nowbar::g_instances.empty() ? nullptr : nowbar::g_instances.front();
         if (!core || !core->artwork_colors_valid()) {
             r = 0; g = 0; b = 0;
             valid = false;
@@ -64,7 +69,8 @@ public:
     }
 
     bool is_dark_mode() override {
-        auto* core = get_first_instance();
+        std::lock_guard<std::mutex> lk(nowbar::g_instances_mutex);
+        auto* core = nowbar::g_instances.empty() ? nullptr : nowbar::g_instances.front();
         return core ? core->get_dark_mode() : true;
     }
 
@@ -106,10 +112,6 @@ public:
     }
 
 private:
-    static nowbar::ControlPanelCore* get_first_instance() {
-        return nowbar::ControlPanelCore::get_first_instance();
-    }
-
     static std::vector<nowbar_color_listener*> s_listeners;
     static std::mutex s_listener_mutex;
     static bool s_pending_notify;

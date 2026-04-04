@@ -111,9 +111,12 @@ static pfc::string8 resolve_unicode_notation(const pfc::string8& input) {
 
 namespace nowbar {
 
-// Static instance registry for theme/settings change notifications
-static std::vector<ControlPanelCore *> g_instances;
-static std::mutex g_instances_mutex;
+// Instance registry for theme/settings change notifications.
+// Declared extern in control_panel_core.h so that nowbar_color_service_impl
+// can lock g_instances_mutex before reading colour values from the core,
+// preventing a TOCTOU race between the pointer load and its use.
+std::vector<ControlPanelCore *> g_instances;
+std::mutex g_instances_mutex;
 static bool g_shutdown = false;  // Prevents access to statics during shutdown
 
 // Serialises concurrent save_waveform_entry calls.
