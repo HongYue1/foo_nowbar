@@ -3381,6 +3381,18 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       BYTE* pBits = nullptr;
       HDC memDC = CreateCompatibleDC(NULL);
       HBITMAP hBmp = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, (void**)&pBits, NULL, 0);
+
+      // CreateDIBSection can fail under GDI resource pressure.  Guard every
+      // subsequent pointer access; fall through to the numbered-square fallback
+      // below if the allocation did not succeed.
+      if (!hBmp || !pBits) {
+        DeleteDC(memDC);
+        Gdiplus::Color iconColor(alpha, baseIconColor.GetR(),
+                                 baseIconColor.GetG(), baseIconColor.GetB());
+        draw_numbered_square_icon(g, iconRect, iconColor, index + 1);
+        return;   // early-return from the draw_cbutton lambda
+      }
+
       HBITMAP hOldBmp = (HBITMAP)SelectObject(memDC, hBmp);
 
       // GDI font with DEFAULT_CHARSET triggers Windows font linking
