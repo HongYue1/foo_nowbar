@@ -2081,6 +2081,28 @@ bool execute_fb2k_action_by_path(const char* path) {
 
     pfc::string8 target_path(path);
 
+    // Build a GUID→(display-name, parent-GUID) map for all mainmenu_group
+    // services exactly once before the command loop.  Without this, the inner
+    // while(parent_id != guid_null) walk re-enumerates every group service for
+    // each command, producing O(C × G × D) calls where C is the number of
+    // commands, G the number of groups, and D the menu depth.  On a typical
+    // install this can take hundreds of milliseconds on the first click.
+    struct GroupInfo { pfc::string8 name; GUID parent; };
+    std::map<GUID, GroupInfo> group_map;
+    {
+        service_enum_t<mainmenu_group> ge;
+        service_ptr_t<mainmenu_group> grp;
+        while (ge.next(grp)) {
+            service_ptr_t<mainmenu_group_popup> popup;
+            if (grp->service_query_t(popup)) {
+                GroupInfo info;
+                popup->get_display_string(info.name);
+                info.parent = grp->get_parent();
+                group_map[grp->get_guid()] = std::move(info);
+            }
+        }
+    }
+
     // Enumerate all main menu commands and find one matching the path
     service_enum_t<mainmenu_commands> enumerator;
     service_ptr_t<mainmenu_commands> commands;
@@ -2097,30 +2119,16 @@ bool execute_fb2k_action_by_path(const char* path) {
             pfc::string8 command_name;
             commands->get_name(command_index, command_name);
 
-            // Get parent group names
+            // Walk the parent-group chain using the pre-built map (O(D) per command)
             std::list<pfc::string8> name_parts;
             name_parts.push_back(command_name);
 
             GUID parent_id = commands->get_parent();
             while (parent_id != pfc::guid_null) {
-                service_enum_t<mainmenu_group> group_enum;
-                service_ptr_t<mainmenu_group> group;
-                bool found = false;
-
-                while (group_enum.next(group)) {
-                    if (group->get_guid() == parent_id) {
-                        service_ptr_t<mainmenu_group_popup> popup;
-                        if (group->service_query_t(popup)) {
-                            pfc::string8 group_name;
-                            popup->get_display_string(group_name);
-                            name_parts.push_front(group_name);
-                        }
-                        parent_id = group->get_parent();
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) break;
+                auto it = group_map.find(parent_id);
+                if (it == group_map.end()) break;
+                name_parts.push_front(it->second.name);
+                parent_id = it->second.parent;
             }
 
             // Build full path string
@@ -2299,6 +2307,23 @@ CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_m
 
     pfc::string8 target_path(path);
 
+    // Pre-build group-name map (same optimisation as execute_fb2k_action_by_path).
+    struct GroupInfo { pfc::string8 name; GUID parent; };
+    std::map<GUID, GroupInfo> group_map;
+    {
+        service_enum_t<mainmenu_group> ge;
+        service_ptr_t<mainmenu_group> grp;
+        while (ge.next(grp)) {
+            service_ptr_t<mainmenu_group_popup> popup;
+            if (grp->service_query_t(popup)) {
+                GroupInfo info;
+                popup->get_display_string(info.name);
+                info.parent = grp->get_parent();
+                group_map[grp->get_guid()] = std::move(info);
+            }
+        }
+    }
+
     // Search main menu commands (same traversal logic as execute_fb2k_action_by_path)
     service_enum_t<mainmenu_commands> enumerator;
     service_ptr_t<mainmenu_commands> commands;
@@ -2313,30 +2338,16 @@ CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_m
             pfc::string8 command_name;
             commands->get_name(command_index, command_name);
 
-            // Get parent group names
+            // Walk the parent-group chain using the pre-built map
             std::list<pfc::string8> name_parts;
             name_parts.push_back(command_name);
 
             GUID parent_id = commands->get_parent();
             while (parent_id != pfc::guid_null) {
-                service_enum_t<mainmenu_group> group_enum;
-                service_ptr_t<mainmenu_group> group;
-                bool found = false;
-
-                while (group_enum.next(group)) {
-                    if (group->get_guid() == parent_id) {
-                        service_ptr_t<mainmenu_group_popup> popup;
-                        if (group->service_query_t(popup)) {
-                            pfc::string8 group_name;
-                            popup->get_display_string(group_name);
-                            name_parts.push_front(group_name);
-                        }
-                        parent_id = group->get_parent();
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) break;
+                auto it = group_map.find(parent_id);
+                if (it == group_map.end()) break;
+                name_parts.push_front(it->second.name);
+                parent_id = it->second.parent;
             }
 
             // Build full path string
