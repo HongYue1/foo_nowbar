@@ -179,16 +179,19 @@ void PlaybackStateManager::on_playback_time(double p_time) noexcept {
     // ensures at most one lambda is queued at any moment; the lambda reads
     // back m_latest_playback_time so it always dispatches the newest value
     // rather than the (potentially stale) value captured at enqueue time.
+    //
+    // Memory ordering: the store to m_latest_playback_time must be visible
+    // to the main-thread lambda before it loads the value.  We establish a
+    // release edge on m_time_update_pending here and a matching acquire edge
+    // in the lambda, creating a happens-before relationship that guarantees
+    // the load sees the most recent store.
     m_latest_playback_time.store(p_time, std::memory_order_relaxed);
-    if (m_time_update_pending.exchange(true)) return;
+    if (m_time_update_pending.exchange(true, std::memory_order_release)) return;
     fb2k::inMainThread([]() {
-        // Read g_instance exactly once on the main thread.  shutdown() also runs
-        // on the main thread, so a single load here is an atomic snapshot —
-        // no second read can observe a different value within this dispatch.
         PlaybackStateManager* mgr = g_instance;
         if (!mgr) return;
         mgr->m_time_update_pending.store(false, std::memory_order_relaxed);
-        double t = mgr->m_latest_playback_time.load(std::memory_order_relaxed);
+        double t = mgr->m_latest_playback_time.load(std::memory_order_acquire);
         try {
             mgr->m_state.playback_time = t;
             mgr->notify_time_changed(t);
