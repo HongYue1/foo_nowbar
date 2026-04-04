@@ -226,10 +226,8 @@ static bool pt_in_rect(const RECT &r, int x, int y) {
 // as foobar2000's default volume control: position = 2^(dB/10).
 // This gives perceptually-even volume distribution (more resolution at lower volumes).
 static inline float db_to_slider(float db) {
-    auto position = std::pow(2.0, db / 10.0);
-    if (position < 0.0) position = 0.0;
-    if (position > 1.0) position = 1.0;
-    return static_cast<float>(position);
+    // pow(2, x) is always positive so there is no lower-bound to clamp against.
+    return std::clamp(std::pow(2.0f, db / 10.0f), 0.0f, 1.0f);
 }
 
 // Convert slider position (0.0 to 1.0) to dB using the same logarithmic curve
