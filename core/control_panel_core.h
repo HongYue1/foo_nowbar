@@ -172,12 +172,16 @@ public:
     const RECT& get_spectrum_full_rect() const { return m_rect_spectrum_full; }
     // Clears only the individual rects that paint_spectrum_only will redraw,
     // preserving artwork, track info, custom buttons, and volume on the cached bitmap
+    // Use ExtTextOut(ETO_OPAQUE) to fill each dirty rect with the background
+    // colour.  This avoids allocating and freeing a GDI HBRUSH kernel object
+    // on every animation frame (which happens up to 60 times per second).
+    // ETO_OPAQUE fills lprc with the current background colour without
+    // requiring any GDI object to be created or destroyed.
     void clear_spectrum_dirty_rects(HDC hdc, COLORREF bg) const {
-        HBRUSH brush = CreateSolidBrush(bg);
-        FillRect(hdc, &m_rect_spectrum_full, brush);
-        FillRect(hdc, &m_rect_thin_progress, brush);
-        FillRect(hdc, &m_rect_time, brush);
-        DeleteObject(brush);
+        SetBkColor(hdc, bg);
+        ExtTextOutW(hdc, 0, 0, ETO_OPAQUE, &m_rect_spectrum_full, nullptr, 0, nullptr);
+        ExtTextOutW(hdc, 0, 0, ETO_OPAQUE, &m_rect_thin_progress,  nullptr, 0, nullptr);
+        ExtTextOutW(hdc, 0, 0, ETO_OPAQUE, &m_rect_time,           nullptr, 0, nullptr);
     }
     bool is_spectrum_animating_only() const {
         if (!m_spectrum_animating) return false;
@@ -195,11 +199,11 @@ public:
     // Clears the rects that paint_waveform_only will redraw.
     // Bottom margin is NOT cleared here — it's stable (always-tall waveform)
     // and preserved from the last full paint.
+    // Same allocation-free fill as clear_spectrum_dirty_rects above.
     void clear_waveform_dirty_rects(HDC hdc, COLORREF bg) const {
-        HBRUSH brush = CreateSolidBrush(bg);
-        FillRect(hdc, &m_rect_waveform, brush);
-        FillRect(hdc, &m_rect_time, brush);
-        DeleteObject(brush);
+        SetBkColor(hdc, bg);
+        ExtTextOutW(hdc, 0, 0, ETO_OPAQUE, &m_rect_waveform, nullptr, 0, nullptr);
+        ExtTextOutW(hdc, 0, 0, ETO_OPAQUE, &m_rect_time,     nullptr, 0, nullptr);
     }
     bool is_waveform_progress_only() const {
         if (m_needs_full_repaint) return false;
