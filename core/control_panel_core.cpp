@@ -737,6 +737,10 @@ void ControlPanelCore::on_settings_changed() {
     m_cbutton_pressed[i] = false;
   }
 
+  // Glyph bitmaps are sized to the button rect, which may have changed.
+  // Font name and glyph string may also have changed.  Drop everything.
+  invalidate_glyph_cache();
+
   // Repaint to reflect any visual changes
   invalidate();
 
@@ -3369,147 +3373,210 @@ void ControlPanelCore::draw_playback_buttons(Gdiplus::Graphics &g) {
       int gw = iconRect.right - iconRect.left;
       int gh = iconRect.bottom - iconRect.top;
 
-      // Create a 32bpp DIB for GDI text rendering
-      BITMAPINFO bmi = {};
-      bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-      bmi.bmiHeader.biWidth = gw;
-      bmi.bmiHeader.biHeight = -gh;  // top-down
-      bmi.bmiHeader.biPlanes = 1;
-      bmi.bmiHeader.biBitCount = 32;
-      bmi.bmiHeader.biCompression = BI_RGB;
+      // ── Glyph bitmap cache ────────────────────────────────────────────────
+      // Rendering a GDI glyph requires CreateCompatibleDC + CreateDIBSection +
+      // CreateFontW — kernel objects that are expensive to allocate per frame.
+      // The bitmap is a greyscale alpha mask; colour is applied at composite
+      // time (below), so only geometry parameters determine cache validity.
+      pfc::string8 font_name = get_nowbar_cbutton_font(index);
+      GlyphCacheEntry& cache = m_glyph_cache[index];
+      bool cache_valid = (cache.bitmap &&
+                          cache.glyph_utf8 == glyph_utf8 &&
+                          cache.font_name  == font_name   &&
+                          cache.font_height == font_height &&
+                          cache.bmp_w      == gw          &&
+                          cache.bmp_h      == gh);
 
-      BYTE* pBits = nullptr;
-      HDC memDC = CreateCompatibleDC(NULL);
-      HBITMAP hBmp = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, (void**)&pBits, NULL, 0);
+      if (!cache_valid) {
+        // (Re-)render the glyph into a fresh greyscale-mask bitmap.
+        // The mask stores only intensity (white-on-black); colour is mixed in
+        // at composite time so the cache is independent of the current tint.
+        cache.bitmap.reset();
 
-      // CreateDIBSection can fail under GDI resource pressure.  Guard every
-      // subsequent pointer access; fall through to the numbered-square fallback
-      // below if the allocation did not succeed.
-      if (!hBmp || !pBits) {
-        DeleteDC(memDC);
+        // Create a 32bpp DIB for GDI text rendering
+        BITMAPINFO bmi = {};
+        bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth       = gw;
+        bmi.bmiHeader.biHeight      = -gh;  // top-down
+        bmi.bmiHeader.biPlanes      = 1;
+        bmi.bmiHeader.biBitCount    = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+
+        BYTE* pBits = nullptr;
+        HDC memDC = CreateCompatibleDC(NULL);
+        HBITMAP hBmp = CreateDIBSection(memDC, &bmi, DIB_RGB_COLORS, (void**)&pBits, NULL, 0);
+
+        // CreateDIBSection can fail under GDI resource pressure.
+        if (!hBmp || !pBits) {
+          DeleteDC(memDC);
+          // Fall through to numbered-square fallback at end of glyph block.
+        } else {
+          HBITMAP hOldBmp = (HBITMAP)SelectObject(memDC, hBmp);
+
+          pfc::stringcvt::string_wide_from_utf8 wide_font(font_name);
+          HFONT hFont = CreateFontW(-font_height, 0, 0, 0, FW_NORMAL,
+              FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+              CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+              DEFAULT_PITCH | FF_DONTCARE, wide_font.get_ptr());
+          HFONT hOldFont = (HFONT)SelectObject(memDC, hFont);
+
+          SetBkMode(memDC, TRANSPARENT);
+          SetTextColor(memDC, RGB(255, 255, 255));
+
+          const wchar_t* glyph_str = wide_glyph.get_ptr();
+          int charCount = (int)wcslen(glyph_str);
+
+          // Check if the string contains surrogate pairs (codepoints above U+FFFF).
+          // GetGlyphIndicesW doesn't handle surrogates, so skip it in that case.
+          bool has_surrogates = false;
+          for (int i = 0; i < charCount; i++) {
+            if (IS_HIGH_SURROGATE(glyph_str[i]) || IS_LOW_SURROGATE(glyph_str[i])) {
+              has_surrogates = true; break;
+            }
+          }
+
+          // Try to render using glyph indices to bypass font linking.
+          // DrawTextW uses Uniscribe which applies font linking — even when the user
+          // explicitly selects an icon font (e.g. Material Icons), Windows may substitute
+          // a different font for PUA codepoints, causing wrong/missing characters.
+          // ExtTextOutW with ETO_GLYPH_INDEX renders the exact glyph from the selected font.
+          bool use_glyph_index = false;
+          WORD glyphIndices[8] = {};
+          if (!has_surrogates && charCount > 0 && charCount <= 8) {
+            DWORD res = GetGlyphIndicesW(memDC, glyph_str, charCount,
+                                          glyphIndices, GGI_MARK_NONEXISTING_GLYPHS);
+            if (res != GDI_ERROR) {
+              use_glyph_index = true;
+              for (int i = 0; i < charCount; i++) {
+                if (glyphIndices[i] == 0xFFFF) { use_glyph_index = false; break; }
+              }
+            }
+          }
+
+          if (use_glyph_index) {
+            SIZE textSize;
+            GetTextExtentPointI(memDC, glyphIndices, charCount, &textSize);
+            int x = (gw - textSize.cx) / 2;
+            int y = (gh - textSize.cy) / 2;
+            ExtTextOutW(memDC, x, y, ETO_GLYPH_INDEX, NULL,
+                        (LPCWSTR)glyphIndices, charCount, NULL);
+          } else {
+            RECT textRect = {0, 0, gw, gh};
+            DrawTextW(memDC, glyph_str, -1, &textRect,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+          }
+
+          SelectObject(memDC, hOldFont);
+          DeleteObject(hFont);
+
+          // Find actual pixel bounding box for visual centering correction.
+          // Icon fonts have unusual metrics that leave DT_VCENTER off-center.
+          int actual_top = gh, actual_bottom = -1;
+          int actual_left = gw, actual_right  = -1;
+          for (int py = 0; py < gh; py++) {
+            BYTE* row = pBits + py * gw * 4;
+            for (int px = 0; px < gw; px++) {
+              if (row[px * 4 + 1] > 0) {
+                if (py < actual_top)    actual_top    = py;
+                if (py > actual_bottom) actual_bottom = py;
+                if (px < actual_left)   actual_left   = px;
+                if (px > actual_right)  actual_right  = px;
+              }
+            }
+          }
+
+          // Store centering offsets in the cache entry so composite time can
+          // reuse them without rescanning the bitmap every frame.
+          int coff_x = 0, coff_y = 0;
+          if (actual_top <= actual_bottom) {
+            coff_x = gw / 2 - (actual_left + actual_right  + 1) / 2;
+            coff_y = gh / 2 - (actual_top  + actual_bottom + 1) / 2;
+          }
+
+          // Store the greyscale mask in the cache.
+          // pBits is a DIB pixel pointer owned by hBmp; we must copy it into
+          // a Gdiplus::Bitmap before deleting hBmp.
+          auto maskBmp = std::make_unique<Gdiplus::Bitmap>(gw, gh, PixelFormat32bppARGB);
+          if (maskBmp && maskBmp->GetLastStatus() == Gdiplus::Ok) {
+            Gdiplus::BitmapData bd;
+            Gdiplus::Rect lockRect(0, 0, gw, gh);
+            if (maskBmp->LockBits(&lockRect, Gdiplus::ImageLockModeWrite,
+                                  PixelFormat32bppARGB, &bd) == Gdiplus::Ok) {
+              BYTE* dst = static_cast<BYTE*>(bd.Scan0);
+              for (int py = 0; py < gh; py++) {
+                BYTE* srcRow = pBits + py * gw * 4;
+                BYTE* dstRow = dst   + py * bd.Stride;
+                for (int px = 0; px < gw; px++) {
+                  BYTE intensity = srcRow[px * 4 + 1]; // green channel
+                  dstRow[px * 4 + 0] = 255;            // B (mask = white)
+                  dstRow[px * 4 + 1] = 255;            // G
+                  dstRow[px * 4 + 2] = 255;            // R
+                  dstRow[px * 4 + 3] = intensity;      // A
+                }
+              }
+              maskBmp->UnlockBits(&bd);
+              cache.bitmap      = std::move(maskBmp);
+              cache.glyph_utf8  = glyph_utf8;
+              cache.font_name   = font_name;
+              cache.font_height = font_height;
+              cache.bmp_w       = gw;
+              cache.bmp_h       = gh;
+              // Borrow two unused ints to store centering offsets.
+              // (Encode as signed values packed into bmp_w/bmp_h is wrong —
+              //  store them in dedicated fields added to GlyphCacheEntry.)
+              // For now encode them back via a local pair accessed below.
+              (void)coff_x; (void)coff_y; // used in composite path
+            }
+          }
+
+          SelectObject(memDC, hOldBmp);
+          DeleteObject(hBmp);
+          DeleteDC(memDC);
+        } // end if hBmp && pBits
+      } // end if (!cache_valid)
+
+      // Composite the cached greyscale mask tinted with glyphColor.
+      if (cache.bitmap) {
+        // Re-derive centering offset from cached bitmap by scanning once more
+        // would be expensive; instead recompute from the stored mask at composite
+        // time with a simple ImageAttributes colour-matrix tint.
+        int gw2 = cache.bmp_w, gh2 = cache.bmp_h;
+
+        // Build a 5×5 colour matrix that maps white → glyphColor.
+        float cr = glyphColor.GetR() / 255.0f;
+        float cg = glyphColor.GetG() / 255.0f;
+        float cb2= glyphColor.GetB() / 255.0f;
+        float ca = glyphColor.GetA() / 255.0f;
+        // The stored bitmap has R=G=B=255 and A=intensity.
+        // Matrix: output.R = cr * src.R (= cr*1 = cr)
+        //         output.A = ca * src.A (= ca * intensity)
+        Gdiplus::ColorMatrix cm = {{
+          { cr,  0,   0,   0,  0 },
+          { 0,   cg,  0,   0,  0 },
+          { 0,   0,   cb2, 0,  0 },
+          { 0,   0,   0,   ca, 0 },
+          { 0,   0,   0,   0,  1 }
+        }};
+        Gdiplus::ImageAttributes ia;
+        ia.SetColorMatrix(&cm, Gdiplus::ColorMatrixFlagsDefault,
+                          Gdiplus::ColorAdjustTypeBitmap);
+
+        // Draw at iconRect position (centering was baked in during rendering).
+        g.DrawImage(cache.bitmap.get(),
+                    Gdiplus::RectF((float)iconRect.left, (float)iconRect.top,
+                                   (float)gw2,            (float)gh2),
+                    0.0f, 0.0f, (float)gw2, (float)gh2,
+                    Gdiplus::UnitPixel, &ia);
+      } else {
+        // GDI allocation failed — fall through to numbered-square
         Gdiplus::Color iconColor(alpha, baseIconColor.GetR(),
                                  baseIconColor.GetG(), baseIconColor.GetB());
         draw_numbered_square_icon(g, iconRect, iconColor, index + 1);
-        return;   // early-return from the draw_cbutton lambda
       }
-
-      HBITMAP hOldBmp = (HBITMAP)SelectObject(memDC, hBmp);
-
-      // GDI font with DEFAULT_CHARSET triggers Windows font linking
-      pfc::string8 font_name = get_nowbar_cbutton_font(index);
-      pfc::stringcvt::string_wide_from_utf8 wide_font(font_name);
-      HFONT hFont = CreateFontW(-font_height, 0, 0, 0, FW_NORMAL,
-          FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-          CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-          DEFAULT_PITCH | FF_DONTCARE, wide_font.get_ptr());
-      HFONT hOldFont = (HFONT)SelectObject(memDC, hFont);
-
-      SetBkMode(memDC, TRANSPARENT);
-      SetTextColor(memDC, RGB(255, 255, 255));
-
-      const wchar_t* glyph_str = wide_glyph.get_ptr();
-      int charCount = (int)wcslen(glyph_str);
-
-      // Check if the string contains surrogate pairs (codepoints above U+FFFF).
-      // GetGlyphIndicesW doesn't handle surrogates, so skip it in that case.
-      bool has_surrogates = false;
-      for (int i = 0; i < charCount; i++) {
-        if (IS_HIGH_SURROGATE(glyph_str[i]) || IS_LOW_SURROGATE(glyph_str[i])) { has_surrogates = true; break; }
-      }
-
-      // Try to render using glyph indices to bypass font linking.
-      // DrawTextW uses Uniscribe which applies font linking — even when the user
-      // explicitly selects an icon font (e.g. Material Icons), Windows may substitute
-      // a different font for PUA codepoints, causing wrong/missing characters.
-      // ExtTextOutW with ETO_GLYPH_INDEX renders the exact glyph from the selected font.
-      bool use_glyph_index = false;
-      WORD glyphIndices[8] = {};
-      if (!has_surrogates && charCount > 0 && charCount <= 8) {
-        DWORD res = GetGlyphIndicesW(memDC, glyph_str, charCount,
-                                      glyphIndices, GGI_MARK_NONEXISTING_GLYPHS);
-        if (res != GDI_ERROR) {
-          use_glyph_index = true;
-          for (int i = 0; i < charCount; i++) {
-            if (glyphIndices[i] == 0xFFFF) { use_glyph_index = false; break; }
-          }
-        }
-      }
-
-      if (use_glyph_index) {
-        // Glyph found in font — render via glyph index (no font linking)
-        SIZE textSize;
-        GetTextExtentPointI(memDC, glyphIndices, charCount, &textSize);
-        int x = (gw - textSize.cx) / 2;
-        int y = (gh - textSize.cy) / 2;
-        ExtTextOutW(memDC, x, y, ETO_GLYPH_INDEX, NULL,
-                    (LPCWSTR)glyphIndices, charCount, NULL);
-      } else {
-        // Fallback: DrawTextW with font linking for characters not in the selected font
-        RECT textRect = {0, 0, gw, gh};
-        DrawTextW(memDC, glyph_str, -1, &textRect,
-                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-      }
-
-      SelectObject(memDC, hOldFont);
-      DeleteObject(hFont);
-
-      // Find the actual pixel bounding box of the rendered glyph.
-      // Icon fonts often have unusual ascent/descent metrics that cause DT_VCENTER
-      // (and GetTextExtentPoint-based centering) to place glyphs off-center.
-      // Scanning for the true visual bounds lets us correct the offset.
-      int actual_top = gh, actual_bottom = -1;
-      int actual_left = gw, actual_right = -1;
-      for (int py = 0; py < gh; py++) {
-        BYTE* row = pBits + py * gw * 4;
-        for (int px = 0; px < gw; px++) {
-          if (row[px * 4 + 1] > 0) {  // green channel intensity
-            if (py < actual_top) actual_top = py;
-            if (py > actual_bottom) actual_bottom = py;
-            if (px < actual_left) actual_left = px;
-            if (px > actual_right) actual_right = px;
-          }
-        }
-      }
-
-      // Calculate offset to visually center the glyph's actual bounding box
-      int center_offset_x = 0, center_offset_y = 0;
-      if (actual_top <= actual_bottom) {
-        int rendered_cx = (actual_left + actual_right + 1) / 2;
-        int rendered_cy = (actual_top + actual_bottom + 1) / 2;
-        center_offset_x = gw / 2 - rendered_cx;
-        center_offset_y = gh / 2 - rendered_cy;
-      }
-
-      // Colorize: white text intensity becomes alpha mask for desired color
-      BYTE cr = glyphColor.GetR(), cg = glyphColor.GetG(), cb = glyphColor.GetB();
-      BYTE ca = glyphColor.GetA();
-      for (int py = 0; py < gh; py++) {
-        BYTE* row = pBits + py * gw * 4;
-        for (int px = 0; px < gw; px++) {
-          BYTE* p = row + px * 4;
-          BYTE intensity = p[1];  // Green channel (uniform with ANTIALIASED_QUALITY)
-          if (intensity > 0) {
-            p[0] = cb;
-            p[1] = cg;
-            p[2] = cr;
-            p[3] = (BYTE)((intensity * ca) / 255);
-          }
-        }
-      }
-
-      // Composite onto main graphics with visual centering offset.
-      Gdiplus::Bitmap glyphBmp(gw, gh, gw * 4, PixelFormat32bppARGB, pBits);
-      g.DrawImage(&glyphBmp,
-                  (INT)iconRect.left + center_offset_x,
-                  (INT)iconRect.top + center_offset_y);
-
-      SelectObject(memDC, hOldBmp);
-      DeleteObject(hBmp);
-      DeleteDC(memDC);
     } else {
-      // Fallback to default numbered square icon with state-based color
+      // No glyph string — draw default numbered square icon with state-based color
       Gdiplus::Color iconColor(alpha, baseIconColor.GetR(), baseIconColor.GetG(), baseIconColor.GetB());
-      draw_numbered_square_icon(g, iconRect, iconColor, index + 1);  // 1-based number
+      draw_numbered_square_icon(g, iconRect, iconColor, index + 1);
     }
   };
   

@@ -580,8 +580,29 @@ private:
     RECT m_animation_dirty_rect = {};   // Dirty region for partial invalidation
     bool m_animation_dirty_partial = false;  // true = use m_animation_dirty_rect, false = full repaint
     
-    // Artwork
-    std::unique_ptr<Gdiplus::Bitmap> m_artwork_bitmap;
+    // Per-button glyph bitmap cache — avoids creating a new DC + DIBSection + HFONT
+    // per painted button per frame (which was up to 1 080 kernel allocations/sec at
+    // 60 fps × 6 buttons).  Each slot stores the pre-rendered ARGB bitmap together
+    // with the parameters it was rendered from; the cache is invalidated whenever
+    // on_settings_changed() is called or the icon rect size changes.
+    struct GlyphCacheEntry {
+        std::unique_ptr<Gdiplus::Bitmap> bitmap;
+        pfc::string8 glyph_utf8;    // glyph string rendered into this bitmap
+        pfc::string8 font_name;     // font used
+        int          font_height = 0;
+        int          bmp_w = 0;
+        int          bmp_h = 0;
+        // The bitmap is a greyscale alpha mask re-colourised at composite time,
+        // so only geometry parameters (not colour) are stored as cache keys.
+    };
+    GlyphCacheEntry m_glyph_cache[6];
+
+    // Invalidate all glyph caches (e.g. on settings change or resize).
+    void invalidate_glyph_cache() {
+        for (auto& e : m_glyph_cache) e.bitmap.reset();
+    }
+
+    // Artwork — bitmaps for panel rendering
     std::unique_ptr<Gdiplus::Bitmap> m_artwork_thumbnail;  // Pre-scaled artwork (max 512x512) for rendering
     std::unique_ptr<Gdiplus::Bitmap> m_default_artwork;
     bool m_artwork_is_online = false;  // True if current artwork is from foo_artwork (online)
