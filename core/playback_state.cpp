@@ -280,11 +280,12 @@ void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
 }
 
 void PlaybackStateManager::notify_state_changed() {
-    PlaybackState state_snapshot;
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        state_snapshot = m_state;
-    }
+    // m_state is only ever written on the main thread and this function is
+    // also called exclusively from the main thread, so no lock is needed to
+    // snapshot it.  Taking m_mutex here added a kernel round-trip on every
+    // state-change notification (~20 Hz via the time-update path) for zero
+    // thread-safety benefit.
+    PlaybackState state_snapshot = m_state;
     auto snap = m_callbacks_snapshot.load();
     if (!snap) return;
     for (auto* cb : *snap) {
