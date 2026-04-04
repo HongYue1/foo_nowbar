@@ -17,8 +17,10 @@ PlaybackStateManager& PlaybackStateManager::get() {
     if (!g_instance && !g_shutdown_called) {
         g_instance = new PlaybackStateManager();
     }
-    // Guard against calls after shutdown() — dereferencing null is UB.
-    PFC_ASSERT(g_instance != nullptr);
+    // Guard against calls after shutdown(): PFC_ASSERT is compiled out in
+    // Release builds, so a raw null-deref would follow silently.  Use
+    // FB2K_BugCheck() instead — it always fires and produces a callstack.
+    if (!g_instance) FB2K_BugCheck();
     return *g_instance;
 }
 
