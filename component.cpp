@@ -29,7 +29,15 @@ namespace {
     public:
         void on_init() override {
             Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-            Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr);
+            Gdiplus::Status gdiStatus =
+                Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr);
+            if (gdiStatus != Gdiplus::Ok) {
+                FB2K_console_formatter()
+                    << "foo_nowbar: GDI+ startup failed (status "
+                    << static_cast<int>(gdiStatus)
+                    << "); panel rendering will not function";
+                g_gdiplusToken = 0;
+            }
 
             // Force early instantiation of PlaybackStateManager to ensure it
             // registers for playback callbacks before any playback starts
