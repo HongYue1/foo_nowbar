@@ -7060,8 +7060,7 @@ void ControlPanelCore::update_rating_state() {
   // Evaluate %rating% using cached titleformat (compiled once, reused)
   try {
     if (!m_titleformat_rating.is_valid()) {
-      static_api_ptr_t<titleformat_compiler> compiler;
-      compiler->compile(m_titleformat_rating, "%rating%");
+      titleformat_compiler::get()->compile(m_titleformat_rating, "%rating%");
     }
     if (m_titleformat_rating.is_valid()) {
       pfc::string8 rating_str;
