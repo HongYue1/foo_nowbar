@@ -82,7 +82,11 @@ static pfc::string8 resolve_unicode_notation(const pfc::string8& input) {
         if (hex_len >= 4 && hex_len <= 6) {
             char* end = nullptr;
             unsigned long cp = strtoul(hex_start, &end, 16);
-            if (end == hex_start + hex_len && cp <= 0x10FFFF) {
+            // Reject lone-surrogate codepoints: casting them to wchar_t produces
+            // malformed UTF-16 that causes silent glyph loss or assertions inside
+            // Uniscribe / Win32 font rasterizers.
+            if (end == hex_start + hex_len && cp <= 0x10FFFF &&
+                !(cp >= 0xD800 && cp <= 0xDFFF)) {
                 // Encode codepoint as UTF-8
                 wchar_t wbuf[3] = {};
                 int wlen = 0;
