@@ -9114,25 +9114,22 @@ void ControlPanelCore::load_waveform_cache() {
 }
 
 void ControlPanelCore::save_waveform_entry(const char* path, const std::vector<float>& peaks) {
-  // The caller updates m_waveform_cache immediately before calling us.
-  // If the path was already present before this decode run (i.e., we found it
-  // in the file during load_waveform_cache), the in-memory map already held
-  // it — we should not append a duplicate record to the file.
-  // We detect this by checking whether the key existed BEFORE the caller
-  // inserted it: at this point the map contains the new entry, so we check
-  // whether the on-disk count is about to get one more entry that matches
-  // an existing key.  The simplest correct heuristic is: if the cache was
-  // loaded from disk and already contained this path, skip the write.
+  // IMPORTANT: the caller (the waveform decode thread) calls save_waveform_entry
+  // BEFORE inserting into m_waveform_cache.  This ordering is intentional.
+  //
+  // The duplicate guard below reads m_waveform_cache to skip entries that were
+  // already loaded from disk in a previous session.  If the caller inserted into
+  // the cache first, the guard would always fire (the entry would always be
+  // "found") and nothing would ever be written to disk.  Do not swap the order.
   {
     std::lock_guard<std::mutex> lock(m_waveform_mutex);
-    // m_waveform_cache_loaded == true means load_waveform_cache() has run and
-    // any pre-existing entry for this path was already in the map before the
-    // current decode started.  The current decode stores its own new entry, so
-    // if the map had it before, we have a duplicate — don't append again.
+    // m_waveform_cache_loaded == true means load_waveform_cache() ran and any
+    // pre-existing entry for this path was already in the map before the current
+    // decode started.  If the entry is already there AND has the same segment
+    // count, it was loaded from disk — don't append a duplicate record.
     if (m_waveform_cache_loaded &&
         m_waveform_cache.count(std::string(path)) > 0 &&
         m_waveform_cache.at(std::string(path)).size() == peaks.size()) {
-      // Already persisted from a previous session; skip the write.
       return;
     }
   }
