@@ -116,6 +116,14 @@ static std::vector<ControlPanelCore *> g_instances;
 static std::mutex g_instances_mutex;
 static bool g_shutdown = false;  // Prevents access to statics during shutdown
 
+// Serialises concurrent save_waveform_entry calls.
+// Both the CUI and DUI panels each own a ControlPanelCore with its own
+// waveform decode thread.  Without this lock, two simultaneous writes would
+// read the same entry count from the file header, both increment it to the
+// same value, and then append their records at the same file offset —
+// corrupting the cache.
+static std::mutex g_wavecache_file_mutex;
+
 // Forward declare to allow use before full definition
 class theme_change_callback;
 
@@ -9135,6 +9143,13 @@ void ControlPanelCore::save_waveform_entry(const char* path, const std::vector<f
   }
 
   ensure_config_dir_exists();
+
+  // Hold the file mutex for the duration of the read-modify-append sequence.
+  // A second ControlPanelCore instance (CUI + DUI both active) can run its
+  // own waveform decode thread concurrently; without this lock both would
+  // read the same entry count, increment to the same value, and write
+  // overlapping records — corrupting the file.
+  std::lock_guard<std::mutex> file_lock(g_wavecache_file_mutex);
 
   pfc::string8 cache_path = get_wavecache_path();
   pfc::stringcvt::string_wide_from_utf8 wide_path(cache_path);
