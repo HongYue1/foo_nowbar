@@ -616,6 +616,7 @@ private:
     }
 
     // Artwork — bitmaps for panel rendering
+    std::unique_ptr<Gdiplus::Bitmap> m_artwork_bitmap;
     std::unique_ptr<Gdiplus::Bitmap> m_artwork_thumbnail;  // Pre-scaled artwork (max 512x512) for rendering
     std::unique_ptr<Gdiplus::Bitmap> m_default_artwork;
     bool m_artwork_is_online = false;  // True if current artwork is from foo_artwork (online)

@@ -7,8 +7,31 @@
 #include <sstream>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #pragma comment(lib, "uxtheme.lib")
 #pragma comment(lib, "comdlg32.lib")
+
+// GUID does not define operator< so std::map<GUID,...> fails to compile.
+// Provide a hasher and equality predicate for std::unordered_map<GUID,...>.
+namespace {
+    struct GuidHash {
+        size_t operator()(const GUID& g) const noexcept {
+            // FNV-1a over the 16 raw bytes
+            const auto* b = reinterpret_cast<const unsigned char*>(&g);
+            size_t h = 14695981039346656037ULL;
+            for (int i = 0; i < 16; ++i) {
+                h ^= b[i];
+                h *= 1099511628211ULL;
+            }
+            return h;
+        }
+    };
+    struct GuidEqual {
+        bool operator()(const GUID& a, const GUID& b) const noexcept {
+            return memcmp(&a, &b, sizeof(GUID)) == 0;
+        }
+    };
+} // namespace
 
 
 // External declaration from component.cpp
@@ -2088,7 +2111,7 @@ bool execute_fb2k_action_by_path(const char* path) {
     // commands, G the number of groups, and D the menu depth.  On a typical
     // install this can take hundreds of milliseconds on the first click.
     struct GroupInfo { pfc::string8 name; GUID parent; };
-    std::map<GUID, GroupInfo> group_map;
+    std::unordered_map<GUID, GroupInfo, GuidHash, GuidEqual> group_map;
     {
         service_enum_t<mainmenu_group> ge;
         service_ptr_t<mainmenu_group> grp;
@@ -2309,7 +2332,7 @@ CommandState get_fb2k_action_state_by_path(const char* path, bool skip_context_m
 
     // Pre-build group-name map (same optimisation as execute_fb2k_action_by_path).
     struct GroupInfo { pfc::string8 name; GUID parent; };
-    std::map<GUID, GroupInfo> group_map;
+    std::unordered_map<GUID, GroupInfo, GuidHash, GuidEqual> group_map;
     {
         service_enum_t<mainmenu_group> ge;
         service_ptr_t<mainmenu_group> grp;
