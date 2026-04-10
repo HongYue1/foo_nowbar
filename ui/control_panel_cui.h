@@ -76,6 +76,9 @@ private:
     void initialize_core(HWND wnd);
     void update_artwork();
 
+    // Cached titleformat scripts for online artwork lookup
+    service_ptr_t<titleformat_object> m_tf_artist;
+    service_ptr_t<titleformat_object> m_tf_title;
 };
 
 // Factory registration
