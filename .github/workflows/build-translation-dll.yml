@@ -89,28 +89,28 @@ jobs:
 
     # 3.1 Build PFC
     - name: Build PFC
-      run: msbuild columns_ui/pfc/pfc.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\pfc\
+      run: msbuild lib/columns_ui/pfc/pfc.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\pfc\
 
     # 3.2 Build Foobar2000 SDK
     # FORCE OutDir to match what foo_nowbar expects: SDK/x64/foobar2000_SDK/
     - name: Build Foobar2000 SDK
-      run: msbuild columns_ui/foobar2000/SDK/foobar2000_SDK.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\foobar2000_SDK\
+      run: msbuild lib/columns_ui/foobar2000/SDK/foobar2000_SDK.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\foobar2000_SDK\
 
     # 3.3 Build Columns UI SDK
     - name: Build Columns UI SDK
-      run: msbuild columns_ui/columns_ui-sdk/columns_ui-sdk.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\columns_ui_sdk\
+      run: msbuild lib/columns_ui/columns_ui-sdk/columns_ui-sdk.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\columns_ui_sdk\
 
     # 3.4 Build Shared (Try to find project, or assume built by SDK hooks)
     # Note: If this fails, we may need to build 'foobar2000_component_client' instead.
     - name: Build Shared
       run: |
-        if exist columns_ui\foobar2000\shared\shared.vcxproj (
-          msbuild columns_ui\foobar2000\shared\shared.vcxproj /p:Configuration=Release /p:Platform=x64
+        if exist lib\columns_ui\foobar2000\shared\shared.vcxproj (
+          msbuild lib\columns_ui\foobar2000\shared\shared.vcxproj /p:Configuration=Release /p:Platform=x64
         ) else (
            echo "shared.vcxproj not found, assuming shared.lib is built manually or by other projects."
            # Attempt to build component_client as a fallback to generate shared objs if needed
-           if exist columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj (
-             msbuild columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj /p:Configuration=Release /p:Platform=x64
+           if exist lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj (
+             msbuild lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj /p:Configuration=Release /p:Platform=x64
            )
         )
       shell: cmd
