@@ -43,6 +43,10 @@ private:
     std::unique_ptr<ControlPanelCore> m_core;
     bool m_tracking_mouse = false;
 
+    // Cached titleformat scripts for online artwork lookup
+    service_ptr_t<titleformat_object> m_tf_artist;
+    service_ptr_t<titleformat_object> m_tf_title;
+
     // Cached offscreen bitmap for double buffering (avoids alloc/free per frame)
     HDC m_cache_dc = nullptr;
     HBITMAP m_cache_bitmap = nullptr;
