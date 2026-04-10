@@ -69,142 +69,158 @@ void PlaybackStateManager::unregister_callback(IPlaybackStateCallback* cb) {
     );
 }
 
-void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_command, bool p_paused) {
-    m_state.is_playing = true;
-    m_state.is_paused = p_paused;
-    notify_state_changed();
-}
-
-void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) {
-    auto pc = playback_control::get();
-    m_state.is_playing = true;
-    m_state.is_paused = pc->is_paused();
-    m_state.playback_time = 0.0;
-    m_state.track_length = pc->playback_get_length();
-    m_state.can_seek = pc->playback_can_seek();
-    m_state.current_track = p_track;  // Store the track handle
-    m_state.playback_order = playlist_manager::get()->playback_order_get_active();  // Refresh playback order
-
-    // Reset preview skip flag for new track
-    m_preview_skip_triggered = false;
-
-    // Check if we should skip this track due to low rating
-    if (check_and_skip_low_rating(p_track)) {
-        return;  // Track is being skipped, don't update UI
-    }
-
-    // Reset consecutive skip counter on successful playback
-    m_consecutive_rating_skips = 0;
-
-    update_track_info(p_track);
-    notify_track_changed();
-    // notify_state_changed() intentionally omitted here:
-    // on_playback_starting() already fired a state change before this callback,
-    // and on_track_changed() handles all track-specific updates (theme, formats,
-    // artwork, invalidation).  The redundant state notification was causing
-    // evaluate_title_formats() and invalidate() to run a third time per track change.
-}
-
-void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason) {
-    // When starting another track (manual next/prev), don't notify UI of "stopped" state
-    // The on_playback_new_track() callback will fire immediately after with correct state.
-    // Notifying "stopped" here would cause the UI to clear artwork/caches unnecessarily,
-    // causing a visual flash during track transitions.
-    if (p_reason == play_control::stop_reason_starting_another) {
-        return;
-    }
-
-    // Handle infinite playback before clearing state
-    if (p_reason == play_control::stop_reason_eof && get_nowbar_infinite_playback_enabled()) {
-        handle_infinite_playback();
-    }
-
-    m_state.is_playing = false;
-    m_state.is_paused = false;
-    m_state.playback_time = 0.0;
-    m_state.track_length = 0.0;
-    m_state.can_seek = false;
-    m_state.current_track.release();  // Clear the track handle
-
-    // Clear track info to reset to initial state
-    m_state.track_title.reset();
-    m_state.track_artist.reset();
-    m_state.track_album.reset();
-
-    notify_state_changed();
-}
-
-void PlaybackStateManager::on_playback_seek(double p_time) {
-    m_state.playback_time = p_time;
-    notify_time_changed(p_time);
-}
-
-void PlaybackStateManager::on_playback_pause(bool p_state) {
-    m_state.is_paused = p_state;
-    notify_state_changed();
-}
-
-void PlaybackStateManager::on_playback_time(double p_time) {
-    // on_playback_time fires on the audio decoder thread.
-    // Marshal to the main thread to avoid data races with UI paint().
-    fb2k::inMainThread([p_time]() {
-        if (!is_available()) return;
-        auto& mgr = get();
-        mgr.m_state.playback_time = p_time;
-        mgr.notify_time_changed(p_time);
-        mgr.check_preview_skip(p_time);
-    });
-}
-
-void PlaybackStateManager::on_volume_change(float p_new_val) {
-    m_state.volume_db = p_new_val;
-    notify_volume_changed(p_new_val);
-}
-
-void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_info) {
-    // Extract metadata from dynamic info (for streaming sources like internet radio)
-    const char* title = nullptr;
-    const char* artist = nullptr;
-    
-    // Standard metadata
-    if (p_info.meta_exists("TITLE")) {
-        title = p_info.meta_get("TITLE", 0);
-    }
-    if (p_info.meta_exists("ARTIST")) {
-        artist = p_info.meta_get("ARTIST", 0);
-    }
-    
-    // ICY metadata (common in internet radio)
-    if (!title && p_info.meta_exists("STREAMTITLE")) {
-        title = p_info.meta_get("STREAMTITLE", 0);
-    }
-    if (!title && p_info.meta_exists("ICY_TITLE")) {
-        title = p_info.meta_get("ICY_TITLE", 0);
-    }
-    
-    // Alternative artist fields
-    if (!artist && p_info.meta_exists("ALBUMARTIST")) {
-        artist = p_info.meta_get("ALBUMARTIST", 0);
-    }
-    if (!artist && p_info.meta_exists("PERFORMER")) {
-        artist = p_info.meta_get("PERFORMER", 0);
-    }
-    
-    // Update state if we found meaningful metadata
-    bool changed = false;
-    if (title && strlen(title) > 0) {
-        m_state.track_title = title;
-        changed = true;
-    }
-    if (artist && strlen(artist) > 0) {
-        m_state.track_artist = artist;
-        changed = true;
-    }
-    
-    if (changed) {
-        notify_track_changed();
+void PlaybackStateManager::on_playback_starting(play_control::t_track_command p_command, bool p_paused) noexcept {
+    try {
+        m_state.is_playing = true;
+        m_state.is_paused = p_paused;
         notify_state_changed();
-    }
+    } catch (...) {}
+}
+
+void PlaybackStateManager::on_playback_new_track(metadb_handle_ptr p_track) noexcept {
+    try {
+        auto pc = playback_control::get();
+        m_state.is_playing = true;
+        m_state.is_paused = pc->is_paused();
+        m_state.playback_time = 0.0;
+        m_state.track_length = pc->playback_get_length();
+        m_state.can_seek = pc->playback_can_seek();
+        m_state.current_track = p_track;  // Store the track handle
+        m_state.playback_order = playlist_manager::get()->playback_order_get_active();  // Refresh playback order
+
+        // Reset preview skip flag for new track
+        m_preview_skip_triggered = false;
+
+        // Check if we should skip this track due to low rating
+        if (check_and_skip_low_rating(p_track)) {
+            return;  // Track is being skipped, don't update UI
+        }
+
+        // Reset consecutive skip counter on successful playback
+        m_consecutive_rating_skips = 0;
+
+        update_track_info(p_track);
+        notify_track_changed();
+        // notify_state_changed() intentionally omitted here:
+        // on_playback_starting() already fired a state change before this callback,
+        // and on_track_changed() handles all track-specific updates (theme, formats,
+        // artwork, invalidation).  The redundant state notification was causing
+        // evaluate_title_formats() and invalidate() to run a third time per track change.
+    } catch (...) {}
+}
+
+void PlaybackStateManager::on_playback_stop(play_control::t_stop_reason p_reason) noexcept {
+    try {
+        // When starting another track (manual next/prev), don't notify UI of "stopped" state
+        // The on_playback_new_track() callback will fire immediately after with correct state.
+        // Notifying "stopped" here would cause the UI to clear artwork/caches unnecessarily,
+        // causing a visual flash during track transitions.
+        if (p_reason == play_control::stop_reason_starting_another) {
+            return;
+        }
+
+        // Handle infinite playback before clearing state
+        if (p_reason == play_control::stop_reason_eof && get_nowbar_infinite_playback_enabled()) {
+            handle_infinite_playback();
+        }
+
+        m_state.is_playing = false;
+        m_state.is_paused = false;
+        m_state.playback_time = 0.0;
+        m_state.track_length = 0.0;
+        m_state.can_seek = false;
+        m_state.current_track.release();  // Clear the track handle
+
+        // Clear track info to reset to initial state
+        m_state.track_title.reset();
+        m_state.track_artist.reset();
+        m_state.track_album.reset();
+
+        notify_state_changed();
+    } catch (...) {}
+}
+
+void PlaybackStateManager::on_playback_seek(double p_time) noexcept {
+    try {
+        m_state.playback_time = p_time;
+        notify_time_changed(p_time);
+    } catch (...) {}
+}
+
+void PlaybackStateManager::on_playback_pause(bool p_state) noexcept {
+    try {
+        m_state.is_paused = p_state;
+        notify_state_changed();
+    } catch (...) {}
+}
+
+void PlaybackStateManager::on_playback_time(double p_time) noexcept {
+    try {
+        // on_playback_time fires on the audio decoder thread.
+        // Marshal to the main thread to avoid data races with UI paint().
+        fb2k::inMainThread([p_time]() {
+            if (!is_available()) return;
+            auto& mgr = get();
+            mgr.m_state.playback_time = p_time;
+            mgr.notify_time_changed(p_time);
+            mgr.check_preview_skip(p_time);
+        });
+    } catch (...) {}
+}
+
+void PlaybackStateManager::on_volume_change(float p_new_val) noexcept {
+    try {
+        m_state.volume_db = p_new_val;
+        notify_volume_changed(p_new_val);
+    } catch (...) {}
+}
+
+void PlaybackStateManager::on_playback_dynamic_info_track(const file_info& p_info) noexcept {
+    try {
+        // Extract metadata from dynamic info (for streaming sources like internet radio)
+        const char* title = nullptr;
+        const char* artist = nullptr;
+
+        // Standard metadata
+        if (p_info.meta_exists("TITLE")) {
+            title = p_info.meta_get("TITLE", 0);
+        }
+        if (p_info.meta_exists("ARTIST")) {
+            artist = p_info.meta_get("ARTIST", 0);
+        }
+
+        // ICY metadata (common in internet radio)
+        if (!title && p_info.meta_exists("STREAMTITLE")) {
+            title = p_info.meta_get("STREAMTITLE", 0);
+        }
+        if (!title && p_info.meta_exists("ICY_TITLE")) {
+            title = p_info.meta_get("ICY_TITLE", 0);
+        }
+
+        // Alternative artist fields
+        if (!artist && p_info.meta_exists("ALBUMARTIST")) {
+            artist = p_info.meta_get("ALBUMARTIST", 0);
+        }
+        if (!artist && p_info.meta_exists("PERFORMER")) {
+            artist = p_info.meta_get("PERFORMER", 0);
+        }
+
+        // Update state if we found meaningful metadata
+        bool changed = false;
+        if (title && strlen(title) > 0) {
+            m_state.track_title = title;
+            changed = true;
+        }
+        if (artist && strlen(artist) > 0) {
+            m_state.track_artist = artist;
+            changed = true;
+        }
+
+        if (changed) {
+            notify_track_changed();
+            notify_state_changed();
+        }
+    } catch (...) {}
 }
 
 void PlaybackStateManager::update_track_info(metadb_handle_ptr p_track) {
@@ -370,9 +386,6 @@ void PlaybackStateManager::handle_infinite_playback() {
     pfc::list_t<metadb_handle_ptr> matching_tracks;
     pfc::list_t<metadb_handle_ptr> fallback_tracks;
 
-    // Seed random with current time
-    srand(static_cast<unsigned int>(time(nullptr)));
-
     for (t_size i = 0; i < library_items.get_count(); i++) {
         metadb_handle_ptr track = library_items[i];
         if (!track.is_valid()) continue;
@@ -412,7 +425,8 @@ void PlaybackStateManager::handle_infinite_playback() {
     if (matching_tracks.get_count() > 0) {
         // Shuffle matching tracks
         for (t_size i = matching_tracks.get_count() - 1; i > 0; i--) {
-            t_size j = rand() % (i + 1);
+            std::uniform_int_distribution<t_size> dist(0, i);
+            t_size j = dist(m_rng);
             if (i != j) {
                 metadb_handle_ptr temp = matching_tracks[i];
                 matching_tracks.replace_item(i, matching_tracks[j]);
@@ -429,7 +443,8 @@ void PlaybackStateManager::handle_infinite_playback() {
     if (tracks_to_add.get_count() < tracks_to_select && fallback_tracks.get_count() > 0) {
         // Shuffle fallback tracks
         for (t_size i = fallback_tracks.get_count() - 1; i > 0; i--) {
-            t_size j = rand() % (i + 1);
+            std::uniform_int_distribution<t_size> dist(0, i);
+            t_size j = dist(m_rng);
             if (i != j) {
                 metadb_handle_ptr temp = fallback_tracks[i];
                 fallback_tracks.replace_item(i, fallback_tracks[j]);
@@ -540,8 +555,7 @@ bool PlaybackStateManager::check_and_skip_low_rating(metadb_handle_ptr p_track) 
     try {
         // Compile once and cache the titleformat object
         if (!m_rating_format.is_valid()) {
-            static_api_ptr_t<titleformat_compiler> compiler;
-            compiler->compile(m_rating_format, "%rating%");
+            titleformat_compiler::get()->compile(m_rating_format, "%rating%");
         }
         if (m_rating_format.is_valid()) {
             pfc::string8 rating_str;
