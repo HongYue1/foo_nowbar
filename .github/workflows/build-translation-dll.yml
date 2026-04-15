@@ -1,11 +1,24 @@
-name: Build Component
+name: Build Component (x86 & x64)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+# =============================================================================
+# 1. Build x86 + x64 (matrix)
+# =============================================================================
+  build-multi-platform:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        platform: [x86, x64]
+        include:
+          - platform: x86
+            msbuild_platform: Win32
+            outdir_platform: x86
+          - platform: x64
+            msbuild_platform: x64
+            outdir_platform: x64
 
     steps:
     # -------------------------------------------------------------------------
@@ -14,41 +27,41 @@ jobs:
     
     # 1.1 My Project
     - name: Checkout foo_nowbar
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         path: foo_nowbar
 
     # 1.2 Columns UI Component (Wrapper)
     - name: Checkout Columns UI Source
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: reupen/columns_ui
         path: foo_nowbar/lib/columns_ui
 
     # 1.3 Columns UI SDK (Build target: columns_ui_sdk.lib)
     - name: Checkout Columns UI SDK
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: reupen/columns_ui-sdk
         path: foo_nowbar/lib/columns_ui/columns_ui-sdk
 
     # 1.4 Foobar2000 SDK (Build target: foobar2000_SDK.lib)
     - name: Checkout Foobar2000 SDK
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: reupen/foobar2000-sdk-modified
         path: foo_nowbar/lib/columns_ui/foobar2000
 
     # 1.5 PFC (Build target: pfc.lib)
     - name: Checkout PFC
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: reupen/pfc-modified
         path: foo_nowbar/lib/columns_ui/pfc
 
     # 1.6 libPPUI (Helper)
     - name: Checkout libPPUI
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: marc2k3/foobar2000-sdk
         path: temp_libppui
@@ -63,10 +76,10 @@ jobs:
 
     # 1.7 SVG Services (Header only API)
     - name: Checkout SVG Services
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         repository: reupen/svg-services
-        path: foo_nowbar/lib/columns_ui/svg-services
+        path: columns_ui/svg-services
 
     # -------------------------------------------------------------------------
     # 2. Build Environment Setup
@@ -88,48 +101,111 @@ jobs:
     # -------------------------------------------------------------------------
 
     # 3.1 Build PFC
-    - name: Build PFC
-      run: msbuild foo_nowbar/lib/columns_ui/pfc/pfc.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\pfc\
+    - name: Build PFC (${{ matrix.platform }})
+      shell: cmd
+      run: |
+        msbuild foo_nowbar\lib\columns_ui\pfc\pfc.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=${{ matrix.outdir_platform }}\pfc\
 
     # 3.2 Build Foobar2000 SDK
     # FORCE OutDir to match what foo_nowbar expects: SDK/x64/foobar2000_SDK/
-    - name: Build Foobar2000 SDK
-      run: msbuild foo_nowbar/lib/columns_ui/foobar2000/SDK/foobar2000_SDK.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\foobar2000_SDK\
+    - name: Build Foobar2000 SDK (${{ matrix.platform }})
+      shell: cmd
+      run: |
+        msbuild foo_nowbar\lib\columns_ui\foobar2000\SDK\foobar2000_SDK.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=${{ matrix.outdir_platform }}\foobar2000_SDK\
 
     # 3.3 Build Columns UI SDK
-    - name: Build Columns UI SDK
-      run: msbuild foo_nowbar/lib/columns_ui/columns_ui-sdk/columns_ui-sdk.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=x64\columns_ui_sdk\
+    - name: Build Columns UI SDK (${{ matrix.platform }})
+      shell: cmd
+      run: |
+        msbuild foo_nowbar\lib\columns_ui\columns_ui-sdk\columns_ui-sdk.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=${{ matrix.outdir_platform }}\columns_ui_sdk\
 
     # 3.4 Build Shared (Try to find project, or assume built by SDK hooks)
     # Note: If this fails, we may need to build 'foobar2000_component_client' instead.
-    - name: Build Shared
+    - name: Build Shared (${{ matrix.platform }})
+      shell: cmd
       run: |
         if exist foo_nowbar\lib\columns_ui\foobar2000\shared\shared.vcxproj (
-          msbuild foo_nowbar\lib\columns_ui\foobar2000\shared\shared.vcxproj /p:Configuration=Release /p:Platform=x64
+          msbuild foo_nowbar\lib\columns_ui\foobar2000\shared\shared.vcxproj ^
+            /p:Configuration=Release ^
+            /p:Platform=${{ matrix.msbuild_platform }}
         ) else (
            echo "shared.vcxproj not found, assuming shared.lib is built manually or by other projects."
            # Attempt to build component_client as a fallback to generate shared objs if needed
            if exist foo_nowbar\lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj (
-             msbuild foo_nowbar\lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj /p:Configuration=Release /p:Platform=x64
-           )
+             msbuild foo_nowbar\lib\columns_ui\foobar2000\foobar2000_component_client\foobar2000_component_client.vcxproj /p:Configuration=Release /p:Platform=${{ matrix.msbuild_platform }}
+             )
         )
-      shell: cmd
 
     # -------------------------------------------------------------------------
     # 4. Build Your Component
     # -------------------------------------------------------------------------
-    - name: Build foo_nowbar
-      # We force OutDir to "..\bin\" (relative to project file) so the DLL lands in the repo root/bin
-      run: msbuild foo_nowbar/foo_nowbar.vcxproj /p:Configuration=Release /p:Platform=x64 /p:OutDir=..\bin\
-
-    # Debug: List the bin folder to be sure
-    - name: List Output Files
-      run: dir bin
+    - name: Build foo_nowbar (${{ matrix.platform }})
       shell: cmd
+      run: |
+        msbuild foo_nowbar\foo_nowbar.vcxproj ^
+          /p:Configuration=Release ^
+          /p:Platform=${{ matrix.msbuild_platform }} ^
+          /p:OutDir=..\bin\${{ matrix.outdir_platform }}\
 
-    - name: Upload DLL
-      uses: actions/upload-artifact@v4
+    - name: Upload DLL (${{ matrix.platform }})
+      uses: actions/upload-artifact@v7
       with:
-        name: foo_nowbar_dll
-        path: bin/foo_nowbar.dll
+        name: foo_nowbar_${{ matrix.platform }}
+        path: bin/${{ matrix.outdir_platform }}/foo_nowbar.dll
+        if-no-files-found: error
+
+
+# =============================================================================
+# 2. Package → ONE fb2k-component
+# =============================================================================
+  package:
+    runs-on: windows-latest
+    needs: build-multi-platform
+    name: Package fb2k-component
+
+    steps:
+    - name: Download x86 DLL
+      uses: actions/download-artifact@v8
+      with:
+        name: foo_nowbar_x86
+        path: component_temp
+
+    - name: Download x64 DLL
+      uses: actions/download-artifact@v8
+      with:
+        name: foo_nowbar_x64
+        path: component_temp\x64
+
+    - name: Verify structure
+      shell: cmd
+      run: |
+        echo ===== component structure =====
+        dir component_temp /s
+
+    - name: Create fb2k-component
+      shell: powershell
+      run: |
+        Compress-Archive `
+          -Path "component_temp\*" `
+          -DestinationPath "foo_nowbar.zip" `
+          -CompressionLevel Optimal
+
+        Rename-Item `
+          -Path "foo_nowbar.zip" `
+          -NewName "foo_nowbar.fb2k-component"
+
+    - name: Upload final component
+      uses: actions/upload-artifact@v7
+      with:
+        name: foo_nowbar_component
+        path: foo_nowbar.fb2k-component
         if-no-files-found: error
